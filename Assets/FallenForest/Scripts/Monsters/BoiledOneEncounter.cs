@@ -263,6 +263,9 @@ namespace FallenForest.Monsters
                 playerMotor?.SetControlsEnabled(true);
             }
 
+            // Persistent after-effect starts only once the cinematic/wake-up has finished. It is
+            // saved independently from the spawn flag because an unseen Boiled spawn must not corrupt the screen.
+            SaveSystem.MarkBoiledInfluenced();
             FinishAndDestroy();
         }
 
