@@ -60,6 +60,14 @@ namespace FallenForest.EditorTools
                     SerializedObject vmSo = new(viewmodel);
                     SetObject(vmSo, "gameplayFlashlightRoot", flashlight.transform);
                     vmSo.ApplyModifiedPropertiesWithoutUndo();
+
+                    FlashlightIdleAnimator idleAnimator = viewmodel.GetComponent<FlashlightIdleAnimator>();
+                    if (idleAnimator == null) idleAnimator = viewmodel.gameObject.AddComponent<FlashlightIdleAnimator>();
+                    SerializedObject idleSo = new(idleAnimator);
+                    SetObject(idleSo, "player", player);
+                    SetObject(idleSo, "flashlight", flashlight);
+                    SetObject(idleSo, "viewmodel", viewmodel);
+                    idleSo.ApplyModifiedPropertiesWithoutUndo();
                 }
 
                 if (atmosphere != null)
@@ -90,7 +98,7 @@ namespace FallenForest.EditorTools
                 EditorUtility.SetDirty(camera);
                 EditorSceneManager.MarkSceneDirty(scene);
                 EditorSceneManager.SaveScene(scene);
-                Debug.Log("Fallen Forest: canonical flashlight, exposure, viewmodel, jumpscare and White Eyes wiring completed.");
+                Debug.Log("Fallen Forest: canonical flashlight, idle variants, exposure, viewmodel, jumpscare and White Eyes wiring completed.");
             }
             finally
             {
