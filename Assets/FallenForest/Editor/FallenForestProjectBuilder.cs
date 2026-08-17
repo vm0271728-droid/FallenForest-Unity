@@ -39,6 +39,9 @@ namespace FallenForest.EditorTools
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
             FallenForestSceneAssembler.EnsureRequiredScenesForCI();
+            // A clean Unity 6 CI project can add UniversalAdditionalCameraData before the camera
+            // has a concrete renderer index. Prepare the base camera first so cameraStack is valid.
+            FallenForestViewmodelCameraUrpGuard.PrepareForestBaseCamera();
             FallenForestUserContentIntegrator.PatchGeneratedForestScene();
             FallenForestTerrainVisualIntegrator.Configure();
             FallenForestViewmodelMotionIntegrator.Configure();
