@@ -88,39 +88,65 @@ jobs:
             find "$HOME" -maxdepth 8 -type f -name Unity -perm -111 -print 2>/dev/null || true
             exit 1
           fi
+
           echo "UNITY_EDITOR_PATH=$editor" >> "$GITHUB_ENV"
           echo "Resolved Unity Editor: $editor"
 
-          # Unity CLI beta.5 currently fails while extracting r27c if the NDK parent directory
-          # does not already exist on a fresh Linux editor install. Create only the parent;
-          # the module installer still has to populate and validate the actual toolchain.
           android_player="$(dirname "$editor")/Data/PlaybackEngines/AndroidPlayer"
-          mkdir -p "$android_player/NDK"
 
-          success=0
-          for attempt in 1 2; do
-            echo "Android module installation attempt $attempt"
-            if unity install-modules \
-              -e 6000.0.76f1 \
-              -m android \
-              --cm \
-              --accept-eula \
-              --format ndjson; then
-              success=1
-              break
-            fi
-            echo 'Android module install failed; preserving installed child modules and retrying.'
-            mkdir -p "$android_player/NDK"
-            df -h /
-            sleep 8
-          done
-          test "$success" -eq 1 || { echo 'Unity Android module installation failed after retry.' >&2; exit 1; }
+          # First let Unity's own experimental CLI install everything it can. On beta.5 the r27c
+          # extractor can fail on a fresh Linux runner even after the SDK/JDK/base Android module
+          # have been installed successfully, so a non-zero result here is not immediately fatal.
+          set +e
+          unity install-modules \
+            -e 6000.0.76f1 \
+            -m android \
+            --cm \
+            --accept-eula \
+            --format ndjson
+          unity_module_rc=$?
+          set -e
+          echo "Unity install-modules exit code: $unity_module_rc"
 
-          test -d "$android_player" || { echo "Android Build Support missing: $android_player" >&2; exit 1; }
-          test -f "$android_player/NDK/source.properties" || { echo 'Unity Android NDK child module is missing or incomplete.' >&2; find "$android_player/NDK" -maxdepth 2 -type f | head -30 || true; exit 1; }
+          test -d "$android_player" || { echo "Android Build Support directory missing: $android_player" >&2; exit 1; }
+          test -f "$android_player/UnityEditor.Android.Extensions.dll" || {
+            echo 'Base Android Build Support did not install.' >&2
+            find "$android_player" -maxdepth 2 -type f | head -80 || true
+            exit 1
+          }
           test -d "$android_player/SDK/platform-tools" || { echo 'Unity Android SDK child module is missing or incomplete.' >&2; exit 1; }
           test -x "$android_player/OpenJDK/bin/java" || { echo 'Unity OpenJDK child module is missing or incomplete.' >&2; exit 1; }
+
+          # Unity 6.0.76f1 metadata asks for NDK r27c. If the Unity CLI hit its known extraction-path
+          # failure, use the already-installed official Android command-line tools to install the
+          # exact side-by-side r27c package, then place that toolchain where Unity expects it.
+          if [ ! -f "$android_player/NDK/source.properties" ]; then
+            echo 'Unity CLI did not finish NDK r27c; installing exact r27c with Android sdkmanager fallback.'
+            sdkmanager="$(find "$android_player/SDK/cmdline-tools" -type f -path '*/bin/sdkmanager' -perm -111 -print 2>/dev/null | sort -V | tail -1)"
+            test -n "$sdkmanager" || { echo 'sdkmanager was not installed by Unity Android SDK tools.' >&2; exit 1; }
+
+            export JAVA_HOME="$android_player/OpenJDK"
+            export PATH="$JAVA_HOME/bin:$PATH"
+
+            yes | "$sdkmanager" --sdk_root="$android_player/SDK" --licenses >/dev/null || true
+            "$sdkmanager" --sdk_root="$android_player/SDK" "ndk;27.2.12479018"
+
+            side_ndk="$android_player/SDK/ndk/27.2.12479018"
+            test -f "$side_ndk/source.properties" || {
+              echo 'sdkmanager completed but r27c source.properties is missing.' >&2
+              find "$android_player/SDK/ndk" -maxdepth 2 -type f -name source.properties -print || true
+              exit 1
+            }
+
+            rm -rf "$android_player/NDK"
+            mkdir -p "$android_player/NDK"
+            cp -a "$side_ndk"/. "$android_player/NDK"/
+          fi
+
+          test -f "$android_player/NDK/source.properties" || { echo 'Unity Android NDK is missing or incomplete after fallback.' >&2; exit 1; }
+          grep -E 'Pkg.Revision|Pkg.Desc' "$android_player/NDK/source.properties" || cat "$android_player/NDK/source.properties"
           "$android_player/OpenJDK/bin/java" -version
+          echo 'Android toolchain validation passed.'
           df -h /
 
       - name: Activate Unity Personal on the cloud runner
