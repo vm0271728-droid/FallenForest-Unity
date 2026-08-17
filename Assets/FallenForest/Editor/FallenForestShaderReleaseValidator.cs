@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEditor.Build;
-using UnityEditor.Rendering;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace FallenForest.EditorTools
 {
@@ -34,8 +34,8 @@ namespace FallenForest.EditorTools
                     continue;
                 }
 
-                ShaderCompilerMessage[] messages = ShaderUtil.GetShaderMessages(shader);
-                foreach (ShaderCompilerMessage message in messages)
+                ShaderMessage[] messages = ShaderUtil.GetShaderMessages(shader);
+                foreach (ShaderMessage message in messages)
                 {
                     if (message.severity != ShaderCompilerMessageSeverity.Error) continue;
                     string platform = string.IsNullOrEmpty(message.platform) ? "unknown-platform" : message.platform;
