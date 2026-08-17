@@ -61,6 +61,7 @@ jobs:
             -c 6f7f9e1c9e8a \
             -m android \
             --cm \
+            --accept-eula \
             --format ndjson
 
           echo 'Installed editors:'
