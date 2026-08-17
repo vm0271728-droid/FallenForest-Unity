@@ -35,6 +35,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          expected_size='85825470'
+          expected_sha256='0848ea17b01f750747a37e3af9b0e74723efcba58a253c20e798e30b41a5e9d8'
+          drive_file_id='1W9RzSrC8SWn1BJCa_i0OU2Wkk0L0LQe6'
+
           archive=''
           for candidate in \
             'ThirdParty/UserUploads/all-needed.zip' \
@@ -49,13 +53,44 @@ jobs:
             archive="$(find ThirdParty/UserUploads -maxdepth 1 -type f -iname '*.zip' -size +50M -print -quit 2>/dev/null || true)"
           fi
 
-          test -n "$archive" && test -f "$archive" || {
-            echo 'MISSING CANONICAL ARCHIVE: put the single user package in ThirdParty/UserUploads/all-needed.zip' >&2
-            echo 'Expected the ~85.8 MB archive containing grass, arms, flashlight, documents, pickup, Locust, Boiled One, video and screamers.' >&2
+          if [ -z "$archive" ]; then
+            archive='ThirdParty/UserUploads/all-needed.zip'
+            mkdir -p "$(dirname "$archive")"
+            echo 'Canonical archive is not stored in Git; downloading the approved Google Drive source.'
+            curl \
+              --fail \
+              --location \
+              --silent \
+              --show-error \
+              --retry 5 \
+              --retry-delay 2 \
+              --retry-all-errors \
+              --connect-timeout 30 \
+              --max-time 900 \
+              "https://drive.usercontent.google.com/download?id=${drive_file_id}&export=download&confirm=t" \
+              --output "$archive"
+          fi
+
+          test -f "$archive" || {
+            echo 'MISSING CANONICAL ARCHIVE after repository/Drive resolution.' >&2
             exit 3
           }
 
-          echo "Canonical archive: $archive"
+          actual_size="$(stat -c '%s' "$archive")"
+          if [ "$actual_size" != "$expected_size" ]; then
+            echo "CANONICAL ARCHIVE SIZE MISMATCH: expected $expected_size bytes, got $actual_size." >&2
+            file "$archive" || true
+            head -c 160 "$archive" | strings || true
+            exit 3
+          fi
+
+          actual_sha256="$(sha256sum "$archive" | awk '{print $1}')"
+          if [ "$actual_sha256" != "$expected_sha256" ]; then
+            echo "CANONICAL ARCHIVE SHA-256 MISMATCH: expected $expected_sha256, got $actual_sha256." >&2
+            exit 3
+          fi
+
+          echo "Canonical archive verified: $archive ($actual_size bytes, sha256=$actual_sha256)"
           python3 Tools/import_all_needed_archive.py "$archive"
 
           require_file() { test -f "$1" || { echo "MISSING AFTER IMPORT: $1" >&2; exit 4; }; }
