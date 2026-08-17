@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using FallenForest.Core;
+using FallenForest.Player;
 using FallenForest.World;
 using UnityEngine;
 
@@ -137,14 +138,13 @@ namespace FallenForest.Documents
                 if (forestIndex != null && !forestIndex.IsOpen(position, treeClearance))
                     continue;
 
-                // Ignore Terrain itself but reject rocks, logs, structures or another pickup occupying the folder area.
                 Collider[] overlaps = Physics.OverlapSphere(position + Vector3.up * .18f, objectClearance, obstructionMask, QueryTriggerInteraction.Ignore);
                 bool blocked = false;
                 for (int i = 0; i < overlaps.Length; i++)
                 {
                     Collider col = overlaps[i];
                     if (col == null || col is TerrainCollider) continue;
-                    if (col.GetComponentInParent<Player.PlayerMotor>() != null) continue;
+                    if (col.GetComponentInParent<PlayerMotor>() != null) continue;
                     blocked = true;
                     break;
                 }
