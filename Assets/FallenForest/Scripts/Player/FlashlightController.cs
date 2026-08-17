@@ -15,6 +15,7 @@ namespace FallenForest.Player
         public bool Acquired { get; private set; }
         public bool IsOn { get; private set; }
         public Light Light => flashlight;
+        public GameObject VisualRoot => visualRoot;
         public Ray CurrentRay => new(
             rayOrigin != null ? rayOrigin.position : transform.position,
             rayOrigin != null ? rayOrigin.forward : transform.forward);
@@ -61,6 +62,14 @@ namespace FallenForest.Player
         {
             visualRoot = root;
             ApplyState();
+        }
+
+        /// <summary>Hide the camera-held representation after a physical world copy is dropped.</summary>
+        public void HideHeldAfterPhysicalDrop()
+        {
+            IsOn = false;
+            if (flashlight != null) flashlight.enabled = false;
+            if (visualRoot != null) visualRoot.SetActive(false);
         }
 
         private void ApplyState()
