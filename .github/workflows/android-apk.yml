@@ -41,21 +41,6 @@ jobs:
           test -n "$UNITY_USERNAME" || { echo 'Missing GitHub secret: UNITY_USERNAME'; exit 2; }
           test -n "$UNITY_PASSWORD" || { echo 'Missing GitHub secret: UNITY_PASSWORD'; exit 2; }
 
-      - name: Verify release media and exact creature models are present
-        run: |
-          set -euo pipefail
-          test -f Assets/FallenForest/Audio/Menu/creepy_forest_menu.ogg
-          test -f Assets/FallenForest/Audio/Ambience/forest_ambience_cc0.mp3
-          test -f Assets/FallenForest/Audio/Ambience/ambient_horror_cc0.ogg
-          test -f Assets/FallenForest/Audio/Screamers/jakes-screamer.mp3
-          test -f Assets/FallenForest/Audio/Screamers/the-screamer-shared-between-mallie-and-jenny.mp3
-          test ! -f Assets/FallenForest/Audio/Screamers/amazing-grace-analog-horror.mp3
-          test -f Assets/FallenForest/Video/boiled_one_jumpscare.mp4
-          test -d Assets/FallenForest/Art/Models/DoctorNowhere/Locust
-          test -d Assets/FallenForest/Art/Models/DoctorNowhere/Boiled
-          find Assets/FallenForest/Art/Models/DoctorNowhere/Locust -type f \( -iname '*.fbx' -o -iname '*.obj' -o -iname '*.gltf' -o -iname '*.glb' \) -print -quit | grep -q .
-          find Assets/FallenForest/Art/Models/DoctorNowhere/Boiled -type f \( -iname '*.fbx' -o -iname '*.obj' -o -iname '*.gltf' -o -iname '*.glb' \) -print -quit | grep -q .
-
       - name: Free runner disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -83,6 +68,41 @@ jobs:
           password: ${{ secrets.UNITY_PASSWORD }}
           license-version: 6.x
 
+      - name: Compile/import Unity project
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$UNITY_EDITOR_PATH" \
+            -batchmode \
+            -nographics \
+            -quit \
+            -projectPath "$GITHUB_WORKSPACE" \
+            -logFile -
+
+      - name: Verify final release media and creature models
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          require_file() { if [ ! -f "$1" ]; then echo "MISSING FILE: $1"; missing=1; fi; }
+          require_model() {
+            local dir="$1"
+            if [ ! -d "$dir" ]; then echo "MISSING MODEL DIRECTORY: $dir"; missing=1; return; fi
+            if ! find "$dir" -type f \( -iname '*.fbx' -o -iname '*.obj' -o -iname '*.gltf' -o -iname '*.glb' \) -print -quit | grep -q .; then
+              echo "MISSING 3D MODEL FILE: $dir"; missing=1
+            fi
+          }
+          require_file Assets/FallenForest/Audio/Menu/creepy_forest_menu.ogg
+          require_file Assets/FallenForest/Audio/Ambience/forest_ambience_cc0.mp3
+          require_file Assets/FallenForest/Audio/Ambience/ambient_horror_cc0.ogg
+          require_file Assets/FallenForest/Audio/Screamers/jakes-screamer.mp3
+          require_file Assets/FallenForest/Audio/Screamers/the-screamer-shared-between-mallie-and-jenny.mp3
+          require_file Assets/FallenForest/Video/boiled_one_jumpscare.mp4
+          if [ -f Assets/FallenForest/Audio/Screamers/amazing-grace-analog-horror.mp3 ]; then echo 'FORBIDDEN FILE PRESENT: amazing-grace-analog-horror.mp3'; missing=1; fi
+          require_model Assets/FallenForest/Art/Models/DoctorNowhere/Locust
+          require_model Assets/FallenForest/Art/Models/DoctorNowhere/Boiled
+          exit "$missing"
+
       - name: Cache Unity Library
         uses: actions/cache@v4
         with:
@@ -95,7 +115,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "Unity Editor: $UNITY_EDITOR_PATH"
           "$UNITY_EDITOR_PATH" \
             -batchmode \
             -nographics \
