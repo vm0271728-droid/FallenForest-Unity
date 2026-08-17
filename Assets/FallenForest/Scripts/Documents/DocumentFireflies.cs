@@ -5,19 +5,17 @@ namespace FallenForest.Documents
 {
     /// <summary>
     /// Tiny, deliberately dim fireflies used only as an atmospheric detail above some documents.
-    /// They are not a quest beacon: the cluster culls at distance and uses only a very weak local light.
+    /// They are not a quest beacon: the cluster culls around 12.5m and does not create point lights.
     /// </summary>
     public sealed class DocumentFireflies : MonoBehaviour
     {
         [SerializeField, Range(4, 6)] private int count = 5;
-        [SerializeField] private float visibleDistance = 15f;
+        [SerializeField] private float visibleDistance = 12.5f;
         [SerializeField] private Vector2 heightRange = new(.18f, .48f);
         [SerializeField] private Vector2 radiusRange = new(.10f, .34f);
         [SerializeField] private Vector2 sizeRange = new(.010f, .020f);
         [SerializeField] private float driftSpeed = .48f;
         [SerializeField] private float verticalBob = .035f;
-        [SerializeField] private float pointLightIntensity = .025f;
-        [SerializeField] private float pointLightRange = .55f;
 
         private Transform[] flies;
         private MeshRenderer[] renderers;
@@ -25,7 +23,6 @@ namespace FallenForest.Documents
         private float[] phases;
         private float[] speeds;
         private Material material;
-        private Light clusterLight;
         private Camera cachedCamera;
         private float nextCameraLookup;
 
@@ -53,7 +50,7 @@ namespace FallenForest.Documents
             if (material != null)
             {
                 material.name = "DocumentFirefly_Runtime";
-                Color dimWarm = new(0.68f, 0.78f, 0.30f, 0.82f);
+                Color dimWarm = new(.68f, .78f, .30f, .82f);
                 if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", dimWarm);
                 if (material.HasProperty("_Color")) material.SetColor("_Color", dimWarm);
                 if (material.HasProperty("_EmissionColor"))
@@ -91,17 +88,6 @@ namespace FallenForest.Documents
                 if (material != null) renderer.sharedMaterial = material;
                 renderers[i] = renderer;
             }
-
-            GameObject lightObject = new("Very Dim Firefly Glow", typeof(Light));
-            lightObject.transform.SetParent(transform, false);
-            lightObject.transform.localPosition = Vector3.up * .26f;
-            clusterLight = lightObject.GetComponent<Light>();
-            clusterLight.type = LightType.Point;
-            clusterLight.color = new Color(.68f, .78f, .30f);
-            clusterLight.intensity = pointLightIntensity;
-            clusterLight.range = pointLightRange;
-            clusterLight.shadows = LightShadows.None;
-            clusterLight.renderMode = LightRenderMode.Auto;
         }
 
         private void Update()
@@ -138,13 +124,10 @@ namespace FallenForest.Documents
 
         private void SetVisible(bool visible)
         {
-            if (renderers != null)
-                for (int i = 0; i < renderers.Length; i++)
-                    if (renderers[i] != null && renderers[i].enabled != visible)
-                        renderers[i].enabled = visible;
-
-            if (clusterLight != null && clusterLight.enabled != visible)
-                clusterLight.enabled = visible;
+            if (renderers == null) return;
+            for (int i = 0; i < renderers.Length; i++)
+                if (renderers[i] != null && renderers[i].enabled != visible)
+                    renderers[i].enabled = visible;
         }
 
         private void ClearChildren()

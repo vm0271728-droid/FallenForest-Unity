@@ -11,11 +11,13 @@ namespace FallenForest.UI
         [SerializeField] private PlayerMotor player;
         [SerializeField] private CameraMotion cameraMotion;
         [SerializeField] private CanvasGroup blackout;
+        [SerializeField] private Text titleText;
         [SerializeField] private Text continueText;
         [SerializeField] private Text mainMenuText;
 
         private void Awake()
         {
+            ResolveLabels();
             if (panel != null) panel.SetActive(false);
             RefreshLocalization();
         }
@@ -23,6 +25,7 @@ namespace FallenForest.UI
         private void OnEnable()
         {
             LocalizationSettings.LanguageChanged += RefreshLocalization;
+            ResolveLabels();
             RefreshLocalization();
         }
 
@@ -30,6 +33,7 @@ namespace FallenForest.UI
 
         public void Show()
         {
+            ResolveLabels();
             RefreshLocalization();
             if (panel != null) panel.SetActive(true);
         }
@@ -53,8 +57,17 @@ namespace FallenForest.UI
 
         public void MainMenu() => SceneFlow.MainMenu();
 
+        private void ResolveLabels()
+        {
+            if (panel == null) return;
+            if (titleText == null) titleText = panel.transform.Find("Title")?.GetComponent<Text>();
+            if (continueText == null) continueText = panel.transform.Find("Continue/Label")?.GetComponent<Text>();
+            if (mainMenuText == null) mainMenuText = panel.transform.Find("MainMenu/Label")?.GetComponent<Text>();
+        }
+
         private void RefreshLocalization()
         {
+            if (titleText != null) titleText.text = LocalizationSettings.Text("you_died");
             if (continueText != null) continueText.text = LocalizationSettings.Text("continue");
             if (mainMenuText != null) mainMenuText.text = LocalizationSettings.Text("main_menu");
         }

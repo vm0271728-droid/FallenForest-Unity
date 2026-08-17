@@ -1,4 +1,5 @@
 using System.Collections;
+using FallenForest.Core;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -6,18 +7,12 @@ using UnityEngine.UI;
 namespace FallenForest.UI
 {
     /// <summary>
-    /// Prefab-free loading overlay used by SceneFlow. It survives scene changes,
-    /// reports real AsyncOperation progress and keeps the progress line flush with
-    /// the absolute bottom edge of the display.
-    ///
-    /// If Resources/UI/loading_forest exists it is used as the background artwork;
-    /// otherwise a dark fallback is shown so loading remains functional before the
-    /// final forest artwork is committed.
+    /// Prefab-free loading overlay used by SceneFlow. It survives scene changes, reports real
+    /// AsyncOperation progress and keeps the progress line flush with the bottom edge.
     /// </summary>
     public sealed class LoadingScreenController : MonoBehaviour
     {
         private static LoadingScreenController instance;
-
         private CanvasGroup canvasGroup;
         private RectTransform progressFill;
         private Text loadingText;
@@ -35,7 +30,7 @@ namespace FallenForest.UI
         private static LoadingScreenController Ensure()
         {
             if (instance != null) return instance;
-            GameObject go = new GameObject("FallenForest_LoadingScreen");
+            GameObject go = new("FallenForest_LoadingScreen");
             instance = go.AddComponent<LoadingScreenController>();
             return instance;
         }
@@ -74,8 +69,7 @@ namespace FallenForest.UI
             GameObject background = UiObject("Background", transform);
             Image backgroundImage = background.AddComponent<Image>();
             backgroundImage.raycastTarget = true;
-            RectTransform bgRect = background.GetComponent<RectTransform>();
-            Stretch(bgRect);
+            Stretch(background.GetComponent<RectTransform>());
 
             Sprite forest = Resources.Load<Sprite>("UI/loading_forest");
             if (forest != null)
@@ -99,17 +93,15 @@ namespace FallenForest.UI
             title.fontStyle = FontStyle.Bold;
             title.color = new Color(.91f, .93f, .93f, .96f);
             RectTransform titleRect = title.rectTransform;
-            titleRect.anchorMin = new Vector2(.5f, .5f);
-            titleRect.anchorMax = new Vector2(.5f, .5f);
+            titleRect.anchorMin = titleRect.anchorMax = new Vector2(.5f, .5f);
             titleRect.pivot = new Vector2(.5f, .5f);
             titleRect.sizeDelta = new Vector2(900f, 100f);
             titleRect.anchoredPosition = new Vector2(0f, 56f);
 
-            loadingText = CreateText("LoadingText", transform, "Загрузка...", 23, TextAnchor.MiddleCenter);
+            loadingText = CreateText("LoadingText", transform, LocalizationSettings.Text("loading"), 23, TextAnchor.MiddleCenter);
             loadingText.color = new Color(.82f, .84f, .84f, .92f);
             RectTransform loadingRect = loadingText.rectTransform;
-            loadingRect.anchorMin = new Vector2(.5f, 0f);
-            loadingRect.anchorMax = new Vector2(.5f, 0f);
+            loadingRect.anchorMin = loadingRect.anchorMax = new Vector2(.5f, 0f);
             loadingRect.pivot = new Vector2(.5f, 0f);
             loadingRect.sizeDelta = new Vector2(620f, 50f);
             loadingRect.anchoredPosition = new Vector2(0f, 20f);
@@ -140,7 +132,7 @@ namespace FallenForest.UI
             canvasGroup.alpha = 1f;
             canvasGroup.blocksRaycasts = true;
             SetProgress(0f);
-            loadingText.text = "Загрузка...";
+            loadingText.text = LocalizationSettings.Text("loading");
 
             float visibleFor = 0f;
             AsyncOperation operation = SceneManager.LoadSceneAsync(sceneName, LoadSceneMode.Single);
@@ -153,7 +145,6 @@ namespace FallenForest.UI
 
             operation.allowSceneActivation = false;
             float shownProgress = 0f;
-
             while (operation.progress < .9f)
             {
                 visibleFor += Time.unscaledDeltaTime;
@@ -199,7 +190,7 @@ namespace FallenForest.UI
 
         private static GameObject UiObject(string name, Transform parent)
         {
-            GameObject go = new GameObject(name, typeof(RectTransform));
+            GameObject go = new(name, typeof(RectTransform));
             go.transform.SetParent(parent, false);
             return go;
         }
