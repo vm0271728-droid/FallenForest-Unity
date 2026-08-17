@@ -41,13 +41,18 @@ jobs:
           test -n "$UNITY_USERNAME" || { echo 'Missing GitHub secret: UNITY_USERNAME'; exit 2; }
           test -n "$UNITY_PASSWORD" || { echo 'Missing GitHub secret: UNITY_PASSWORD'; exit 2; }
 
-      - name: Free disk for Unity Android toolchain
+      - name: Free disk while preserving runner Android SDK
         shell: bash
         run: |
           set -euo pipefail
           echo 'Disk before cleanup:'
           df -h /
-          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet /usr/local/share/boost || true
+          echo "Runner ANDROID_HOME=${ANDROID_HOME:-unset}"
+          test -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}" || { echo 'GitHub runner Android SDK is missing.' >&2; exit 1; }
+          # Keep /usr/local/lib/android: the hosted Ubuntu image already carries a complete SDK,
+          # sdkmanager and recent NDKs. Removing it forced Unity's experimental CLI to redownload
+          # everything and exposed an r27c extraction bug.
+          sudo rm -rf /opt/ghc /usr/share/dotnet /usr/local/share/boost || true
           docker system prune -af >/dev/null 2>&1 || true
           sudo apt-get clean || true
           echo 'Disk after cleanup:'
@@ -73,7 +78,7 @@ jobs:
             --format ndjson
           unity editors -i --format json || true
 
-      - name: Install Android Build Support and child modules
+      - name: Install Unity Android base module and wire runner toolchain
         shell: bash
         run: |
           set -euo pipefail
@@ -83,67 +88,62 @@ jobs:
           if [ -z "$editor" ]; then
             editor="$(find /opt -type f -path '*/6000.0.76f1/Editor/Unity' -perm -111 -print -quit 2>/dev/null || true)"
           fi
-          if [ -z "$editor" ]; then
-            echo 'Unity 6000.0.76f1 installed, but Editor executable could not be located.' >&2
-            find "$HOME" -maxdepth 8 -type f -name Unity -perm -111 -print 2>/dev/null || true
-            exit 1
-          fi
-
+          test -n "$editor" || { echo 'Unity 6000.0.76f1 editor executable was not found.' >&2; exit 1; }
           echo "UNITY_EDITOR_PATH=$editor" >> "$GITHUB_ENV"
           echo "Resolved Unity Editor: $editor"
 
           android_player="$(dirname "$editor")/Data/PlaybackEngines/AndroidPlayer"
 
-          # First let Unity's own experimental CLI install everything it can. On beta.5 the r27c
-          # extractor can fail on a fresh Linux runner even after the SDK/JDK/base Android module
-          # have been installed successfully, so a non-zero result here is not immediately fatal.
-          set +e
+          # Install only the Unity Android playback/build module. Explicitly skip child modules so
+          # beta.5 never touches its broken r27c extraction path.
           unity install-modules \
             -e 6000.0.76f1 \
             -m android \
-            --cm \
+            --no-cm \
             --accept-eula \
             --format ndjson
-          unity_module_rc=$?
-          set -e
-          echo "Unity install-modules exit code: $unity_module_rc"
 
           test -d "$android_player" || { echo "Android Build Support directory missing: $android_player" >&2; exit 1; }
           test -f "$android_player/UnityEditor.Android.Extensions.dll" || {
-            echo 'Base Android Build Support did not install.' >&2
-            find "$android_player" -maxdepth 2 -type f | head -80 || true
+            echo 'Unity base Android Build Support did not install.' >&2
+            find "$android_player" -maxdepth 2 -type f | head -100 || true
             exit 1
           }
-          test -d "$android_player/SDK/platform-tools" || { echo 'Unity Android SDK child module is missing or incomplete.' >&2; exit 1; }
-          test -x "$android_player/OpenJDK/bin/java" || { echo 'Unity OpenJDK child module is missing or incomplete.' >&2; exit 1; }
 
-          # Unity 6.0.76f1 metadata asks for NDK r27c. If the Unity CLI hit its known extraction-path
-          # failure, use the already-installed official Android command-line tools to install the
-          # exact side-by-side r27c package, then place that toolchain where Unity expects it.
-          if [ ! -f "$android_player/NDK/source.properties" ]; then
-            echo 'Unity CLI did not finish NDK r27c; installing exact r27c with Android sdkmanager fallback.'
-            sdkmanager="$(find "$android_player/SDK/cmdline-tools" -type f -path '*/bin/sdkmanager' -perm -111 -print 2>/dev/null | sort -V | tail -1)"
-            test -n "$sdkmanager" || { echo 'sdkmanager was not installed by Unity Android SDK tools.' >&2; exit 1; }
+          runner_sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          test -d "$runner_sdk" || { echo "Runner Android SDK missing: $runner_sdk" >&2; exit 1; }
 
-            export JAVA_HOME="$android_player/OpenJDK"
-            export PATH="$JAVA_HOME/bin:$PATH"
+          sdkmanager="$(find "$runner_sdk/cmdline-tools" -type f -path '*/bin/sdkmanager' -perm -111 -print 2>/dev/null | sort -V | tail -1)"
+          test -n "$sdkmanager" || { echo 'Runner Android sdkmanager could not be found.' >&2; exit 1; }
 
-            yes | "$sdkmanager" --sdk_root="$android_player/SDK" --licenses >/dev/null || true
-            "$sdkmanager" --sdk_root="$android_player/SDK" "ndk;27.2.12479018"
-
-            side_ndk="$android_player/SDK/ndk/27.2.12479018"
-            test -f "$side_ndk/source.properties" || {
-              echo 'sdkmanager completed but r27c source.properties is missing.' >&2
-              find "$android_player/SDK/ndk" -maxdepth 2 -type f -name source.properties -print || true
-              exit 1
-            }
-
-            rm -rf "$android_player/NDK"
-            mkdir -p "$android_player/NDK"
-            cp -a "$side_ndk"/. "$android_player/NDK"/
+          # Unity 6.0.76f1 expects Android NDK r27c = 27.2.12479018. Hosted runners currently ship
+          # nearby NDK revisions, so install the exact side-by-side revision with Google's SDK tool.
+          yes | "$sdkmanager" --sdk_root="$runner_sdk" --licenses >/dev/null || true
+          if [ ! -f "$runner_sdk/ndk/27.2.12479018/source.properties" ]; then
+            "$sdkmanager" --sdk_root="$runner_sdk" "ndk;27.2.12479018"
           fi
+          test -f "$runner_sdk/ndk/27.2.12479018/source.properties" || { echo 'Exact NDK r27c installation failed.' >&2; exit 1; }
 
-          test -f "$android_player/NDK/source.properties" || { echo 'Unity Android NDK is missing or incomplete after fallback.' >&2; exit 1; }
+          java_bin="$(readlink -f "$(command -v java)")"
+          java_home="$(dirname "$(dirname "$java_bin")")"
+          test -x "$java_home/bin/java" || { echo "System Java home invalid: $java_home" >&2; exit 1; }
+
+          # Unity normally gets these three directories from Hub child modules. Symlink the same
+          # expected locations to the maintained toolchains already present on the GitHub runner.
+          rm -rf "$android_player/SDK" "$android_player/NDK" "$android_player/OpenJDK"
+          ln -s "$runner_sdk" "$android_player/SDK"
+          ln -s "$runner_sdk/ndk/27.2.12479018" "$android_player/NDK"
+          ln -s "$java_home" "$android_player/OpenJDK"
+
+          echo "JAVA_HOME=$java_home" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$runner_sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$runner_sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$runner_sdk/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+          test -d "$android_player/SDK/platform-tools" || { echo 'Android SDK platform-tools missing.' >&2; exit 1; }
+          test -f "$android_player/NDK/source.properties" || { echo 'Android NDK source.properties missing.' >&2; exit 1; }
+          test -x "$android_player/OpenJDK/bin/java" || { echo 'OpenJDK link invalid.' >&2; exit 1; }
+
           grep -E 'Pkg.Revision|Pkg.Desc' "$android_player/NDK/source.properties" || cat "$android_player/NDK/source.properties"
           "$android_player/OpenJDK/bin/java" -version
           echo 'Android toolchain validation passed.'
