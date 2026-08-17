@@ -22,7 +22,7 @@ namespace FallenForest.UI
             if (shownThisLaunch) return;
             shownThisLaunch = true;
 
-            GameObject root = new GameObject("FallenForest_Disclaimer");
+            GameObject root = new("FallenForest_Disclaimer");
             root.AddComponent<StartupDisclaimer>().Build();
         }
 
@@ -57,12 +57,15 @@ namespace FallenForest.UI
             headingRect.anchorMin = headingRect.anchorMax = new Vector2(.5f, .5f);
             headingRect.pivot = new Vector2(.5f, .5f);
             headingRect.sizeDelta = new Vector2(1200f, 90f);
-            headingRect.anchoredPosition = new Vector2(0f, 180f);
+            headingRect.anchoredPosition = new Vector2(0f, 205f);
 
             string bodyText =
-                "В игре присутствуют скримеры, резкие звуки, тревожные сцены и мигающие визуальные эффекты.\n\n" +
-                "Если вы чувствительны к вспышкам или страдаете фоточувствительной эпилепсией, " +
-                "прекратите игру при появлении дискомфорта.";
+                "В игре присутствуют скримеры, резкие звуки, тревожные сцены\n" +
+                "и мигающие визуальные эффекты.\n\n" +
+                "Если у вас есть фоточувствительная эпилепсия или высокая\n" +
+                "чувствительность к подобным эффектам, рекомендуется\n" +
+                "воздержаться от игры.\n\n" +
+                "Для лучшего погружения используйте наушники.";
 
             Text body = CreateText("Body", transform, bodyText, 28, TextAnchor.MiddleCenter);
             body.color = new Color(.78f, .79f, .8f, 1f);
@@ -70,8 +73,8 @@ namespace FallenForest.UI
             RectTransform bodyRect = body.rectTransform;
             bodyRect.anchorMin = bodyRect.anchorMax = new Vector2(.5f, .5f);
             bodyRect.pivot = new Vector2(.5f, .5f);
-            bodyRect.sizeDelta = new Vector2(1300f, 300f);
-            bodyRect.anchoredPosition = new Vector2(0f, -5f);
+            bodyRect.sizeDelta = new Vector2(1380f, 390f);
+            bodyRect.anchoredPosition = new Vector2(0f, -10f);
 
             Button button = CreateButton(transform);
             button.onClick.AddListener(Dismiss);
@@ -116,7 +119,7 @@ namespace FallenForest.UI
             rect.anchorMin = rect.anchorMax = new Vector2(.5f, .5f);
             rect.pivot = new Vector2(.5f, .5f);
             rect.sizeDelta = new Vector2(430f, 82f);
-            rect.anchoredPosition = new Vector2(0f, -245f);
+            rect.anchoredPosition = new Vector2(0f, -295f);
 
             Text label = CreateText("Label", go.transform, "ПРОДОЛЖИТЬ", 25, TextAnchor.MiddleCenter);
             label.fontStyle = FontStyle.Bold;
@@ -128,7 +131,7 @@ namespace FallenForest.UI
         private static void EnsureEventSystem()
         {
             if (FindFirstObjectByType<EventSystem>() != null) return;
-            GameObject events = new GameObject("EventSystem");
+            GameObject events = new("EventSystem");
             events.AddComponent<EventSystem>();
 #if ENABLE_INPUT_SYSTEM
             events.AddComponent<InputSystemUIInputModule>();
@@ -140,7 +143,7 @@ namespace FallenForest.UI
 
         private static GameObject CreateUiObject(string name, Transform parent)
         {
-            GameObject go = new GameObject(name, typeof(RectTransform));
+            GameObject go = new(name, typeof(RectTransform));
             go.transform.SetParent(parent, false);
             return go;
         }
