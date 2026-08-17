@@ -21,16 +21,11 @@ namespace FallenForest.EditorTools
         {
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
-            // A clean CI checkout only carries the Unity version in ProjectSettings.
-            // Build-time setup therefore owns the active URP configuration instead of
-            // inheriting whatever graphics settings happen to exist on a machine.
             FallenForestRenderPipelineSetup.EnsureConfigured();
-
             FallenForestUserContentIntegrator.IntegrateBeforeSceneAssembly();
+            FallenForestTreePackIntegrator.BuildAvailable();
 
             // Structural prefab passes must finish before the final user-material pass.
-            // PickupWheelMeshSplitter rebuilds Pickup_Final from the merged FBX; applying the
-            // PBR material before that split gets overwritten by the rebuilt source renderers.
             FallenForestGrassMaterialBuilder.ApplyIfAvailable();
             FallenForestCreatureMotionIntegrator.Apply();
             PickupWheelMeshSplitter.BuildIfAvailable();
@@ -38,28 +33,25 @@ namespace FallenForest.EditorTools
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
-            // Apply exact user PBR textures only after all structural prefab rebuilds. This makes
-            // the material state that readiness validation sees the same state scene instances use.
             FallenForestUserMaterialBuilder.ApplyIfAvailable();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
             FallenForestSceneAssembler.EnsureRequiredScenesForCI();
-            // A clean Unity 6 CI project can add UniversalAdditionalCameraData before the camera
-            // has a concrete renderer index. Prepare the base camera first so cameraStack is valid.
             FallenForestViewmodelCameraUrpGuard.PrepareForestBaseCamera();
             FallenForestUserContentIntegrator.PatchGeneratedForestScene();
+            FallenForestTreePackIntegrator.PatchForestScene();
             FallenForestTerrainVisualIntegrator.Configure();
             FallenForestViewmodelMotionIntegrator.Configure();
             FallenForestStreamingVideoIntegrator.ConfigureBoiledSequence();
             FallenForestFinaleIntegrator.FinalizeForestEnding();
             FallenForestRuntimeSceneIntegrator.FinalizeForestRuntimeSystems();
+            FallenForestCanonicalRuntimeIntegrator.Configure();
             FallenForestMenuFinalizer.FinalizeMainMenu();
             FallenForestRuntimeSceneIntegrator.FinalizeMainMenuRuntimeSystems();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
-            // Do not allow another technically green but visually/runtime-incomplete APK.
             FallenForestRuntimeReadinessValidator.ValidateOrThrow();
             FallenForestReleaseValidator.ValidateReleaseOrThrow();
 
