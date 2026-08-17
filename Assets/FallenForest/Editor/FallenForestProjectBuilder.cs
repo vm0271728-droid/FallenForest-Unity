@@ -28,6 +28,8 @@ namespace FallenForest.EditorTools
             // The supplied pickup is one merged FBX; turn it into a real Rigidbody + 4 WheelCollider
             // vehicle before any finale scene references are serialized.
             PickupWheelMeshSplitter.BuildIfAvailable();
+            // Re-apply authored PBR materials after the pickup splitter has replaced Pickup_Final.
+            FallenForestUserMaterialBuilder.ApplyIfAvailable();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
