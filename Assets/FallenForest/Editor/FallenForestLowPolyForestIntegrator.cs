@@ -57,19 +57,27 @@ namespace FallenForest.EditorTools
                 foreach (Transform candidate in logicalRoots)
                 {
                     string semantic = BuildSemantic(candidate);
-                    if (IsRockSemantic(semantic)) rocks.Add(candidate);
-                    else if (IsTreeSemantic(semantic)) trees.Add(candidate);
+                    bool treeSemantic = IsTreeSemantic(semantic);
+                    bool rockSemantic = IsRockSemantic(semantic);
+
+                    if (treeSemantic && !rockSemantic) trees.Add(candidate);
+                    else if (rockSemantic && !treeSemantic) rocks.Add(candidate);
                     else unknown.Add(candidate);
                 }
 
-                // Some exports give objects generic names such as Cube. If a candidate is tall and
-                // narrow it is safely tree-like; squat candidates become rock/ground props.
+                // Generic exports often use names such as Cube/Plane. Classify those by proportions.
+                // Mixed tree+rock roots should already have been recursively split by FindLogicalRoots;
+                // this geometric fallback prevents one generic wrapper from poisoning the whole pack.
                 foreach (Transform candidate in unknown)
                 {
                     Bounds b = CalculateBounds(candidate.GetComponentsInChildren<Renderer>(true));
-                    if (b.size.y > Mathf.Max(2.2f, Mathf.Max(b.size.x, b.size.z) * 1.25f)) trees.Add(candidate);
+                    float horizontal = Mathf.Max(b.size.x, b.size.z);
+                    if (b.size.y > Mathf.Max(2.2f, horizontal * 1.25f)) trees.Add(candidate);
                     else if (b.size.magnitude > .25f) rocks.Add(candidate);
                 }
+
+                trees = trees.Where(t => t != null).Distinct().ToList();
+                rocks = rocks.Where(t => t != null).Distinct().ToList();
 
                 if (trees.Count == 0)
                     throw new InvalidDataException("Tree_Pack.fbx imported, but no usable tree model roots were discovered.");
@@ -84,7 +92,7 @@ namespace FallenForest.EditorTools
 
                 AssetDatabase.SaveAssets();
                 AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
-                Debug.Log($"Fallen Forest: user low-poly pack built into {treeCount} tree and {rockCount} rock prefabs.");
+                Debug.Log($"Fallen Forest: user low-poly pack built into {treeCount} tree and {rockCount} rock prefabs from {logicalRoots.Count} logical FBX roots.");
             }
             finally
             {
@@ -203,24 +211,55 @@ namespace FallenForest.EditorTools
 
         private static List<Transform> FindLogicalRoots(Transform root)
         {
-            List<Transform> result = new();
+            var result = new List<Transform>();
             foreach (Transform child in root)
-            {
-                if (child.GetComponentsInChildren<Renderer>(true).Length > 0)
-                    result.Add(child);
-            }
-            if (result.Count > 0) return result;
+                CollectLogicalRoots(child, result, 0);
 
-            // Fallback for a flattened export: group renderers by their highest child beneath root.
-            HashSet<Transform> unique = new();
-            foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+            if (result.Count == 0)
             {
-                Transform t = renderer.transform;
-                while (t.parent != null && t.parent != root) t = t.parent;
-                if (t != root) unique.Add(t);
+                foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+                    if (renderer != null)
+                        result.Add(renderer.transform);
             }
-            result.AddRange(unique);
-            return result;
+
+            return result.Where(t => t != null).Distinct().ToList();
+        }
+
+        private static void CollectLogicalRoots(Transform node, List<Transform> result, int depth)
+        {
+            if (node == null || depth > 12) return;
+            Renderer[] renderers = node.GetComponentsInChildren<Renderer>(true);
+            if (renderers.Length == 0) return;
+
+            string semantic = BuildSemantic(node);
+            bool treeSemantic = IsTreeSemantic(semantic);
+            bool rockSemantic = IsRockSemantic(semantic);
+
+            // A semantically coherent group is one authored object even if it has several child
+            // renderers (for example trunk + two branch cards). Never split that object apart.
+            if (treeSemantic != rockSemantic)
+            {
+                result.Add(node);
+                return;
+            }
+
+            var rendererChildren = new List<Transform>();
+            foreach (Transform child in node)
+                if (child.GetComponentsInChildren<Renderer>(true).Length > 0)
+                    rendererChildren.Add(child);
+
+            // Mixed semantic wrapper (whole forest pack) or generic multi-object wrapper: recurse.
+            if (rendererChildren.Count > 1)
+            {
+                int before = result.Count;
+                foreach (Transform child in rendererChildren)
+                    CollectLogicalRoots(child, result, depth + 1);
+                if (result.Count > before) return;
+            }
+
+            // A single renderer or a generic indivisible hierarchy is still a legitimate prop;
+            // dimensions will classify it later rather than discarding user geometry.
+            result.Add(node);
         }
 
         private static string BuildSemantic(Transform root)
