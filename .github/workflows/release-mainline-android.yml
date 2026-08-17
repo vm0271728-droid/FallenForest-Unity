@@ -28,6 +28,16 @@ jobs:
           fetch-depth: 1
           lfs: false
 
+      - name: Install archive tools for exact user sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          if ! sudo DEBIAN_FRONTEND=noninteractive apt-get install -y p7zip-full; then
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y 7zip
+          fi
+          command -v 7z || command -v 7zz || command -v 7za
+
       - name: Download and verify canonical user archives
         shell: bash
         run: |
@@ -50,6 +60,8 @@ jobs:
           test -f 'Assets/FallenForest/Art/Vegetation/UserTrees/BlackSpruce/Source/Picea mariana HD_Arctic mat 100_LOD0.fbx'
           test -f 'Assets/FallenForest/Art/Vegetation/UserTrees/BlackSpruce/Source/zzz_LODs/LOD4/Picea mariana HD_Arctic mat 100_LOD4.fbx'
           test -f Assets/FallenForest/Art/Vegetation/UserTrees/DeadFirs/Source/firs.obj
+          test -f Assets/FallenForest/Art/Vegetation/UserTrees/LowPolyForest/Source/Extracted/Tree_Pack.fbx
+          test -f Assets/FallenForest/Art/Vegetation/UserTrees/LowPolyForest/Source/Extracted/Tree_Pack.obj
           echo 'Canonical user archives imported and integrity-checked.'
 
       - name: Fetch vetted CC0 audio
