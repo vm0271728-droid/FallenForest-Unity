@@ -54,6 +54,7 @@ namespace FallenForest.EditorTools
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
+            FallenForestShaderReleaseValidator.ValidateOrThrow();
             FallenForestRuntimeReadinessValidator.ValidateOrThrow();
             FallenForestReleaseValidator.ValidateReleaseOrThrow();
 
