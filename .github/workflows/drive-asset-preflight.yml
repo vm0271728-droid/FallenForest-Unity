@@ -1,0 +1,59 @@
+name: Fallen Forest Drive asset preflight
+
+on:
+  push:
+    branches: [ integration/release-mainline ]
+    paths:
+      - '.github/workflows/drive-asset-preflight.yml'
+  workflow_dispatch:
+
+jobs:
+  preflight:
+    name: Download and validate canonical release archive
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout release integration branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          lfs: false
+
+      - name: Download canonical archive from Google Drive
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --quiet 'gdown>=5.2,<6'
+          python3 -m gdown 'https://drive.google.com/uc?id=1W9RzSrC8SWn1BJCa_i0OU2Wkk0L0LQe6' -O all-needed.zip
+          test -f all-needed.zip
+          actual="$(stat -c %s all-needed.zip)"
+          echo "Downloaded bytes: $actual"
+          test "$actual" = '85825470' || {
+            echo "Unexpected archive size: $actual (expected 85825470)" >&2
+            exit 2
+          }
+          sha256sum all-needed.zip
+
+      - name: Import exact user release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Tools/import_all_needed_archive.py all-needed.zip
+
+      - name: Verify imported source payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          require_file() { test -f "$1" || { echo "MISSING AFTER IMPORT: $1" >&2; exit 3; }; }
+          require_file Assets/FallenForest/Art/Vegetation/UserGrass/Source/Grass.fbx
+          require_file Assets/FallenForest/Art/Viewmodel/Arms/Source/fpsarms.fbx
+          require_file Assets/FallenForest/Art/Viewmodel/Flashlight/Source/flashlightfbx.fbx
+          require_file Assets/FallenForest/Art/Documents/UserDocument/Source/document_file_folder.obj
+          require_file 'Assets/FallenForest/Art/Vehicles/Pickup/Source/Pickup Afghanistan.fbx'
+          require_file 'Assets/FallenForest/Art/Models/DoctorNowhere/Locust/Source/T_O_E Locust - By Doumty.fbx'
+          require_file Assets/FallenForest/Art/Models/DoctorNowhere/Boiled/Source/BoiledOne.fbx
+          require_file Assets/FallenForest/Audio/Screamers/jakes-screamer.mp3
+          require_file Assets/FallenForest/Audio/Screamers/the-screamer-shared-between-mallie-and-jenny.mp3
+          require_file Assets/FallenForest/Video/boiled_one_jumpscare.mp4
+          test ! -f Assets/FallenForest/Audio/Screamers/amazing-grace-analog-horror.mp3
+          echo 'Canonical Drive payload imported and validated successfully.'
