@@ -4,6 +4,10 @@ on:
   push:
     branches: [ integration/release-content-pass ]
     paths:
+      - 'Assets/**'
+      - 'Packages/**'
+      - 'ProjectSettings/**'
+      - 'Tools/**'
       - '.github/workflows/integration-compile.yml'
 
 concurrency:
