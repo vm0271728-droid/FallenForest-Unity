@@ -1,0 +1,181 @@
+name: Fallen Forest full release APK audit
+
+on:
+  push:
+    branches: [ integration/release-mainline ]
+    paths:
+      - '.github/workflows/release-mainline-android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: fallen-forest-full-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Unity 6 full Android release audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+
+    steps:
+      - name: Checkout clean release branch
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          lfs: false
+
+      - name: Download and verify canonical user archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --quiet 'gdown>=5.2,<6'
+          python3 -m gdown 'https://drive.google.com/uc?id=1W9RzSrC8SWn1BJCa_i0OU2Wkk0L0LQe6' -O all-needed.zip
+          test -f all-needed.zip
+          test "$(stat -c %s all-needed.zip)" = '85825470'
+          echo '0848ea17b01f750747a37e3af9b0e74723efcba58a253c20e798e30b41a5e9d8  all-needed.zip' | sha256sum -c -
+          python3 Tools/import_all_needed_archive.py all-needed.zip
+          test ! -f Assets/FallenForest/Audio/Screamers/amazing-grace-analog-horror.mp3
+          echo 'Canonical user archive imported and integrity-checked.'
+
+      - name: Fetch vetted CC0 audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Tools/fetch_cc0_audio.py
+
+      - name: Verify Unity ID credentials exist
+        env:
+          UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$UNITY_USERNAME" || { echo 'Missing GitHub secret: UNITY_USERNAME' >&2; exit 2; }
+          test -n "$UNITY_PASSWORD" || { echo 'Missing GitHub secret: UNITY_PASSWORD' >&2; exit 2; }
+
+      - name: Free disk for Unity Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h /
+          sudo rm -rf /opt/ghc /usr/share/dotnet /usr/local/share/boost || true
+          docker system prune -af >/dev/null 2>&1 || true
+          sudo apt-get clean || true
+          df -h /
+
+      - name: Install Unity Hub and Xvfb
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://hub.unity3d.com/linux/keys/public | gpg --dearmor | sudo tee /usr/share/keyrings/Unity_Technologies_ApS.gpg >/dev/null
+          echo 'deb [signed-by=/usr/share/keyrings/Unity_Technologies_ApS.gpg] https://hub-dist.unity3d.com/artifactory/hub-debian-prod-local stable main' | sudo tee /etc/apt/sources.list.d/unityhub.list >/dev/null
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y unityhub xvfb
+
+          if [ -x /usr/lib/unityhub/unityhub ]; then
+            hub=/usr/lib/unityhub/unityhub
+          elif [ -x /opt/unityhub/unityhub ]; then
+            hub=/opt/unityhub/unityhub
+          else
+            hub="$(command -v unityhub)"
+          fi
+          test -x "$hub" || { echo 'Unity Hub executable not found.' >&2; exit 1; }
+          licensing_client="$(find "$(dirname "$hub")" -maxdepth 5 -type f -name Unity.Licensing.Client -perm -111 -print -quit 2>/dev/null || true)"
+          test -n "$licensing_client" || { echo 'Unity.Licensing.Client not found.' >&2; exit 1; }
+          echo "UNITY_HUB_PATH=$hub" >> "$GITHUB_ENV"
+
+      - name: Install Unity 6.0.76f1 and Android modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_root="$HOME/Unity/Hub/Editor"
+          mkdir -p "$install_root"
+          xvfb-run -a "$UNITY_HUB_PATH" --headless install-path -s "$install_root" --errors
+          xvfb-run -a "$UNITY_HUB_PATH" --headless install \
+            --version 6000.0.76f1 \
+            --changeset 6f7f9e1c9e8a \
+            --module android \
+            --childModules \
+            --errors
+          editor="$install_root/6000.0.76f1/Editor/Unity"
+          test -x "$editor" || { echo 'Unity 6000.0.76f1 editor missing.' >&2; exit 1; }
+          echo "UNITY_EDITOR_PATH=$editor" >> "$GITHUB_ENV"
+
+      - name: Verify Unity Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          android_player="$(dirname "$UNITY_EDITOR_PATH")/Data/PlaybackEngines/AndroidPlayer"
+          test -f "$android_player/UnityEditor.Android.Extensions.dll"
+          test -d "$android_player/SDK/platform-tools"
+          test -f "$android_player/NDK/source.properties"
+          test -x "$android_player/OpenJDK/bin/java"
+          grep -E 'Pkg.Revision|Pkg.Desc' "$android_player/NDK/source.properties" || true
+          "$android_player/OpenJDK/bin/java" -version
+
+      - name: Activate Unity Personal
+        uses: buildalon/activate-unity-license@v2
+        with:
+          license: Personal
+          username: ${{ secrets.UNITY_USERNAME }}
+          password: ${{ secrets.UNITY_PASSWORD }}
+          license-version: 6.x
+
+      - name: Compile and import exact release project
+        shell: bash
+        run: |
+          set -o pipefail
+          "$UNITY_EDITOR_PATH" \
+            -batchmode \
+            -nographics \
+            -quit \
+            -projectPath "$GITHUB_WORKSPACE" \
+            -logFile "$RUNNER_TEMP/unity-release-import.log"
+          code=$?
+          cat "$RUNNER_TEMP/unity-release-import.log"
+          exit $code
+
+      - name: Build real development-signed APK
+        shell: bash
+        run: |
+          set -o pipefail
+          "$UNITY_EDITOR_PATH" \
+            -batchmode \
+            -nographics \
+            -quit \
+            -projectPath "$GITHUB_WORKSPACE" \
+            -executeMethod FallenForest.EditorTools.FallenForestProjectBuilder.CIBuildAndroid \
+            -logFile "$RUNNER_TEMP/unity-release-build.log"
+          code=$?
+          cat "$RUNNER_TEMP/unity-release-build.log"
+          exit $code
+
+      - name: Verify produced APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk='Builds/Android/Fallen_Forest_1.0.0.apk'
+          test -s "$apk"
+          ls -lh "$apk"
+          sha256sum "$apk"
+
+      - name: Upload Unity diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fallen-Forest-Unity-release-logs
+          path: |
+            ${{ runner.temp }}/unity-release-import.log
+            ${{ runner.temp }}/unity-release-build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fallen-Forest-Android-APK
+          path: Builds/Android/Fallen_Forest_1.0.0.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
