@@ -4,26 +4,31 @@ using UnityEngine.Rendering;
 namespace FallenForest.Documents
 {
     /// <summary>
-    /// Tiny, deliberately dim fireflies used only as an atmospheric detail above some documents.
-    /// They are not a quest beacon: the cluster culls at distance and uses only a very weak local light.
+    /// Tiny, deliberately dim fireflies used only as atmospheric detail above some documents.
+    /// They are not a quest beacon: the cluster culls at short range and defaults to emissive-only
+    /// specks so several documents can carry the effect without adding mobile real-time lights.
     /// </summary>
     public sealed class DocumentFireflies : MonoBehaviour
     {
         [SerializeField, Range(4, 6)] private int count = 5;
-        [SerializeField] private float visibleDistance = 15f;
+        [SerializeField] private float visibleDistance = 12.5f;
         [SerializeField] private Vector2 heightRange = new(.18f, .48f);
         [SerializeField] private Vector2 radiusRange = new(.10f, .34f);
-        [SerializeField] private Vector2 sizeRange = new(.010f, .020f);
-        [SerializeField] private float driftSpeed = .48f;
-        [SerializeField] private float verticalBob = .035f;
-        [SerializeField] private float pointLightIntensity = .025f;
-        [SerializeField] private float pointLightRange = .55f;
+        [SerializeField] private Vector2 sizeRange = new(.009f, .018f);
+        [SerializeField] private float driftSpeed = .44f;
+        [SerializeField] private float verticalBob = .032f;
+
+        [Header("Optional physical glow")]
+        [SerializeField] private bool usePhysicalPointLight;
+        [SerializeField] private float pointLightIntensity = .012f;
+        [SerializeField] private float pointLightRange = .42f;
 
         private Transform[] flies;
         private MeshRenderer[] renderers;
         private Vector3[] baseOffsets;
         private float[] phases;
         private float[] speeds;
+        private float[] baseSizes;
         private Material material;
         private Light clusterLight;
         private Camera cachedCamera;
@@ -45,6 +50,7 @@ namespace FallenForest.Documents
             baseOffsets = new Vector3[count];
             phases = new float[count];
             speeds = new float[count];
+            baseSizes = new float[count];
 
             Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
             if (shader == null) shader = Shader.Find("Unlit/Color");
@@ -53,11 +59,11 @@ namespace FallenForest.Documents
             if (material != null)
             {
                 material.name = "DocumentFirefly_Runtime";
-                Color dimWarm = new(0.68f, 0.78f, 0.30f, 0.82f);
+                Color dimWarm = new(.43f, .52f, .16f, .72f);
                 if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", dimWarm);
                 if (material.HasProperty("_Color")) material.SetColor("_Color", dimWarm);
                 if (material.HasProperty("_EmissionColor"))
-                    material.SetColor("_EmissionColor", new Color(.20f, .25f, .06f, 1f));
+                    material.SetColor("_EmissionColor", new Color(.075f, .095f, .018f, 1f));
             }
 
             for (int i = 0; i < count; i++)
@@ -76,10 +82,10 @@ namespace FallenForest.Documents
                     Next(rng, heightRange.x, heightRange.y),
                     Mathf.Sin(angle) * radius);
                 phases[i] = Next(rng, 0f, Mathf.PI * 2f);
-                speeds[i] = Next(rng, .78f, 1.28f);
+                speeds[i] = Next(rng, .76f, 1.24f);
+                baseSizes[i] = Next(rng, sizeRange.x, sizeRange.y);
 
-                float size = Next(rng, sizeRange.x, sizeRange.y);
-                fly.transform.localScale = Vector3.one * size;
+                fly.transform.localScale = Vector3.one * baseSizes[i];
                 fly.transform.localPosition = baseOffsets[i];
                 flies[i] = fly.transform;
 
@@ -92,16 +98,19 @@ namespace FallenForest.Documents
                 renderers[i] = renderer;
             }
 
-            GameObject lightObject = new("Very Dim Firefly Glow", typeof(Light));
-            lightObject.transform.SetParent(transform, false);
-            lightObject.transform.localPosition = Vector3.up * .26f;
-            clusterLight = lightObject.GetComponent<Light>();
-            clusterLight.type = LightType.Point;
-            clusterLight.color = new Color(.68f, .78f, .30f);
-            clusterLight.intensity = pointLightIntensity;
-            clusterLight.range = pointLightRange;
-            clusterLight.shadows = LightShadows.None;
-            clusterLight.renderMode = LightRenderMode.Auto;
+            if (usePhysicalPointLight)
+            {
+                GameObject lightObject = new("Extremely Dim Firefly Glow", typeof(Light));
+                lightObject.transform.SetParent(transform, false);
+                lightObject.transform.localPosition = Vector3.up * .26f;
+                clusterLight = lightObject.GetComponent<Light>();
+                clusterLight.type = LightType.Point;
+                clusterLight.color = new Color(.48f, .56f, .18f);
+                clusterLight.intensity = pointLightIntensity;
+                clusterLight.range = pointLightRange;
+                clusterLight.shadows = LightShadows.None;
+                clusterLight.renderMode = LightRenderMode.Auto;
+            }
         }
 
         private void Update()
@@ -129,10 +138,14 @@ namespace FallenForest.Documents
             {
                 float t = time * speeds[i] + phases[i];
                 Vector3 offset = baseOffsets[i];
-                offset.x += Mathf.Sin(t * .83f) * .045f + Mathf.Sin(t * 1.91f) * .012f;
-                offset.z += Mathf.Cos(t * .71f) * .040f + Mathf.Sin(t * 1.37f) * .014f;
+                offset.x += Mathf.Sin(t * .83f) * .042f + Mathf.Sin(t * 1.91f) * .010f;
+                offset.z += Mathf.Cos(t * .71f) * .038f + Mathf.Sin(t * 1.37f) * .012f;
                 offset.y += Mathf.Sin(t * 1.43f) * verticalBob;
                 flies[i].localPosition = offset;
+
+                // Tiny breathing/flicker without a per-firefly material or real Light component.
+                float pulse = .88f + Mathf.Sin(t * 2.11f + phases[i]) * .08f;
+                flies[i].localScale = Vector3.one * baseSizes[i] * pulse;
             }
         }
 
@@ -151,6 +164,7 @@ namespace FallenForest.Documents
         {
             for (int i = transform.childCount - 1; i >= 0; i--)
                 Destroy(transform.GetChild(i).gameObject);
+            clusterLight = null;
         }
 
         private void OnDestroy()
