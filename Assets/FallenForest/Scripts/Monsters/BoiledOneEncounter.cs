@@ -2,6 +2,7 @@ using System.Collections;
 using FallenForest.Cinematics;
 using FallenForest.Core;
 using FallenForest.Player;
+using FallenForest.World;
 using UnityEngine;
 
 namespace FallenForest.Monsters
@@ -184,8 +185,9 @@ namespace FallenForest.Monsters
             if (viewport.z <= 0f || viewport.x < 0f || viewport.x > 1f || viewport.y < 0f || viewport.y > 1f)
                 return false;
 
-            // Foliage/terrain must not merely expose one accidental pixel. Require at least two
-            // independent clear rays to the creature before the gaze trigger can accumulate.
+            // Require at least two independent clear rays. Solid geometry blocks normally; the
+            // user-tree foliage uses lightweight trigger volumes marked VisibilityOccluder so
+            // leaves can block gaze without becoming invisible physical walls.
             Vector3 centre = visualRoot != null ? visualRoot.position + Vector3.up * .95f : transform.position + Vector3.up * .95f;
             Vector3 lower = visualRoot != null ? visualRoot.position + Vector3.up * .35f : transform.position + Vector3.up * .35f;
             int visible = 0;
@@ -202,17 +204,47 @@ namespace FallenForest.Monsters
             float distance = delta.magnitude;
             if (distance < .05f) return true;
 
-            if (!Physics.Raycast(
-                    playerCamera.transform.position,
-                    delta / distance,
-                    out RaycastHit hit,
-                    distance + .35f,
-                    gazeVisibilityMask,
-                    QueryTriggerInteraction.Ignore))
-                return false;
+            RaycastHit[] hits = Physics.RaycastAll(
+                playerCamera.transform.position,
+                delta / distance,
+                distance + .35f,
+                gazeVisibilityMask,
+                QueryTriggerInteraction.Collide);
+            if (hits.Length == 0) return false;
 
-            Transform hitTransform = hit.transform;
-            return hitTransform == transform || hitTransform.IsChildOf(transform);
+            // Avoid allocation-heavy LINQ/sorting in the encounter loop. Consume hits by nearest
+            // distance; unrelated trigger zones are ignored, explicit foliage occluders are not.
+            for (int consumed = 0; consumed < hits.Length; consumed++)
+            {
+                int nearest = -1;
+                float nearestDistance = float.MaxValue;
+                for (int i = 0; i < hits.Length; i++)
+                {
+                    if (hits[i].distance < 0f || hits[i].distance >= nearestDistance) continue;
+                    nearestDistance = hits[i].distance;
+                    nearest = i;
+                }
+                if (nearest < 0) break;
+
+                RaycastHit hit = hits[nearest];
+                hits[nearest].distance = -1f;
+                if (hit.collider == null) continue;
+
+                Transform hitTransform = hit.transform;
+                if (hitTransform == transform || hitTransform.IsChildOf(transform))
+                    return true;
+
+                if (hit.collider.isTrigger)
+                {
+                    if (hit.collider.GetComponentInParent<VisibilityOccluder>() != null)
+                        return false;
+                    continue;
+                }
+
+                return false;
+            }
+
+            return false;
         }
 
         /// <summary>
