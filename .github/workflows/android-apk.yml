@@ -19,7 +19,8 @@ jobs:
   android:
     name: Unity 6 Android APK
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
+
     steps:
       - name: Checkout project and LFS assets
         uses: actions/checkout@v4
@@ -30,15 +31,13 @@ jobs:
       - name: Fetch vetted CC0 menu and forest ambience
         run: python3 Tools/fetch_cc0_audio.py
 
-      - name: Verify required Unity credentials exist
+      - name: Verify Unity ID credentials exist
         env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         run: |
           set -euo pipefail
-          test -n "$UNITY_LICENSE" || { echo 'Missing GitHub secret: UNITY_LICENSE'; exit 2; }
-          test -n "$UNITY_EMAIL" || { echo 'Missing GitHub secret: UNITY_EMAIL'; exit 2; }
+          test -n "$UNITY_USERNAME" || { echo 'Missing GitHub secret: UNITY_USERNAME'; exit 2; }
           test -n "$UNITY_PASSWORD" || { echo 'Missing GitHub secret: UNITY_PASSWORD'; exit 2; }
 
       - name: Verify release media and exact creature models are present
@@ -67,6 +66,22 @@ jobs:
           docker-images: false
           swap-storage: false
 
+      - name: Install Unity 6 and Android support
+        id: unity_setup
+        uses: RageAgainstThePixel/unity-setup@v2
+        with:
+          version-file: ProjectSettings/ProjectVersion.txt
+          build-targets: Android
+          cache-installation: true
+
+      - name: Activate Unity Personal on the cloud runner
+        uses: buildalon/activate-unity-license@v2
+        with:
+          license: Personal
+          username: ${{ secrets.UNITY_USERNAME }}
+          password: ${{ secrets.UNITY_PASSWORD }}
+          license-version: 6.x
+
       - name: Cache Unity Library
         uses: actions/cache@v4
         with:
@@ -76,18 +91,17 @@ jobs:
             Library-Android-
 
       - name: Build development-signed APK
-        id: unity_build
-        uses: game-ci/unity-builder@v5
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        with:
-          unityVersion: auto
-          targetPlatform: Android
-          buildMethod: FallenForest.EditorTools.FallenForestProjectBuilder.CIBuildAndroid
-          androidExportType: androidPackage
-          allowDirtyBuild: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Unity Editor: $UNITY_EDITOR_PATH"
+          "$UNITY_EDITOR_PATH" \
+            -batchmode \
+            -nographics \
+            -quit \
+            -projectPath "$GITHUB_WORKSPACE" \
+            -executeMethod FallenForest.EditorTools.FallenForestProjectBuilder.CIBuildAndroid \
+            -logFile -
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
