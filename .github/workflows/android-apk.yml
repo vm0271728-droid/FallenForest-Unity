@@ -1,3 +1,4 @@
+# Cloud Unity Personal build; secrets are configured in GitHub Actions
 name: Build Fallen Forest APK
 
 on:
