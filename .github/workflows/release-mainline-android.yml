@@ -9,6 +9,14 @@ on:
       - 'ProjectSettings/**'
       - 'Tools/**'
       - '.github/workflows/release-mainline-android.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'Assets/**'
+      - 'Packages/**'
+      - 'ProjectSettings/**'
+      - 'Tools/**'
+      - '.github/workflows/release-mainline-android.yml'
   workflow_dispatch:
 
 concurrency:
