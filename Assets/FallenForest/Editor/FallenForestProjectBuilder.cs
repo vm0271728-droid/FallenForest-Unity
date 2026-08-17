@@ -25,10 +25,11 @@ namespace FallenForest.EditorTools
             // real grass and creature assets instead of its bootstrap geometry wherever possible.
             FallenForestUserContentIntegrator.IntegrateBeforeSceneAssembly();
 
-            // Scenes are source-generated from the real runtime world systems when they have not
-            // been committed yet. Exact media/models remain strictly validated afterward.
+            // Scenes are source-generated from the runtime systems, then finalized against the
+            // latest game rules before release validation.
             FallenForestSceneAssembler.EnsureRequiredScenesForCI();
             FallenForestUserContentIntegrator.PatchGeneratedForestScene();
+            FallenForestMenuFinalizer.FinalizeMainMenu();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
             FallenForestReleaseValidator.ValidateReleaseOrThrow();
 
