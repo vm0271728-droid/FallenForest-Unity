@@ -3,6 +3,7 @@ Shader "FallenForest/ForestWindURP"
     Properties
     {
         _BaseMap("Base Map", 2D) = "white" {}
+        _OpacityMap("Opacity Map", 2D) = "white" {}
         _BaseColor("Tint", Color) = (1,1,1,1)
         _Cutoff("Alpha Cutoff", Range(0,1)) = 0.42
         _WindAmplitude("Wind Amplitude", Range(0,0.8)) = 0.22
@@ -19,6 +20,7 @@ Shader "FallenForest/ForestWindURP"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
         TEXTURE2D(_BaseMap); SAMPLER(sampler_BaseMap);
+        TEXTURE2D(_OpacityMap); SAMPLER(sampler_OpacityMap);
         CBUFFER_START(UnityPerMaterial)
         float4 _BaseMap_ST;
         float4 _BaseColor;
@@ -81,6 +83,11 @@ Shader "FallenForest/ForestWindURP"
             return frac(sin(dot(cell, float2(12.9898, 78.233))) * 43758.5453);
         }
 
+        float GrassAlpha(float2 uv)
+        {
+            return SAMPLE_TEXTURE2D(_OpacityMap, sampler_OpacityMap, uv).r * _BaseColor.a;
+        }
+
         float3 Deform(float3 posOS)
         {
             float3 ws = TransformObjectToWorld(posOS);
@@ -125,12 +132,13 @@ Shader "FallenForest/ForestWindURP"
                     clip(IN.grassKeep - GrassNoise(IN.positionWS));
 
                 half4 tex=SAMPLE_TEXTURE2D(_BaseMap,sampler_BaseMap,IN.uv)*_BaseColor;
-                clip(tex.a-_Cutoff);
+                half alpha=GrassAlpha(IN.uv);
+                clip(alpha-_Cutoff);
                 Light light=GetMainLight(TransformWorldToShadowCoord(IN.positionWS));
                 half ndl=saturate(dot(normalize(IN.normalWS),light.direction));
                 half3 ambient=SampleSH(normalize(IN.normalWS));
                 half3 lit=tex.rgb*(ambient + light.color*(0.18h+ndl*0.82h)*light.shadowAttenuation*light.distanceAttenuation);
-                return half4(lit,tex.a);
+                return half4(lit,alpha);
             }
             ENDHLSL
         }
@@ -163,8 +171,8 @@ Shader "FallenForest/ForestWindURP"
             {
                 if (_GrassExclusionEnabled > 0.5)
                     clip(IN.grassKeep - GrassNoise(IN.positionWS));
-                half a=SAMPLE_TEXTURE2D(_BaseMap,sampler_BaseMap,IN.uv).a*_BaseColor.a;
-                clip(a-_Cutoff);
+                half alpha=GrassAlpha(IN.uv);
+                clip(alpha-_Cutoff);
                 return 0;
             }
             ENDHLSL
