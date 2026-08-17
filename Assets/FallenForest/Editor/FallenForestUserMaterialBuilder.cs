@@ -8,6 +8,7 @@ namespace FallenForest.EditorTools
 {
     /// <summary>
     /// Connects the exact texture packages supplied with the user's models to URP materials.
+    /// Standalone metallic/smoothness/roughness masks are packed into URP's metallic-alpha layout.
     /// </summary>
     public static class FallenForestUserMaterialBuilder
     {
@@ -33,6 +34,8 @@ namespace FallenForest.EditorTools
                 Root + "/Art/Viewmodel/Arms/Textures/armAO.png",
                 null,
                 null,
+                false,
+                null,
                 .30f,
                 0f);
             ApplySingle(FinalUserAssetPrefabBuilder.ArmsPrefab, arms);
@@ -43,6 +46,8 @@ namespace FallenForest.EditorTools
                 Root + "/Art/Viewmodel/Flashlight/Textures/flashlightNormal.png",
                 Root + "/Art/Viewmodel/Flashlight/Textures/flashlightAO.png",
                 Root + "/Art/Viewmodel/Flashlight/Textures/flashlightMetallic.png",
+                Root + "/Art/Viewmodel/Flashlight/Textures/flashlightSmoothness.png",
+                false,
                 Root + "/Art/Viewmodel/Flashlight/Textures/flashlighemissive.png",
                 .58f,
                 .92f);
@@ -55,6 +60,8 @@ namespace FallenForest.EditorTools
                 null,
                 null,
                 null,
+                false,
+                null,
                 .24f,
                 0f);
             ApplySingle(FinalUserAssetPrefabBuilder.PickupPrefab, pickup);
@@ -65,6 +72,8 @@ namespace FallenForest.EditorTools
                 Root + "/Art/Documents/UserDocument/Textures/gltf_embedded_2.png",
                 null,
                 null,
+                Root + "/Art/Documents/UserDocument/Textures/gltf_embedded_1@channels=G.png",
+                true,
                 null,
                 .18f,
                 0f);
@@ -73,7 +82,9 @@ namespace FallenForest.EditorTools
                 Root + "/Art/Documents/UserDocument/Textures/gltf_embedded_3.jpeg",
                 Root + "/Art/Documents/UserDocument/Textures/gltf_embedded_5.png",
                 null,
-                null,
+                Root + "/Art/Documents/UserDocument/Textures/gltf_embedded_4@channels=B.png",
+                Root + "/Art/Documents/UserDocument/Textures/gltf_embedded_4@channels=G.png",
+                true,
                 null,
                 .22f,
                 0f);
@@ -86,6 +97,8 @@ namespace FallenForest.EditorTools
             string normalPath,
             string occlusionPath,
             string metallicPath,
+            string smoothnessOrRoughnessPath,
+            bool invertRoughness,
             string emissionPath,
             float smoothness,
             float emissionStrength)
@@ -127,16 +140,25 @@ namespace FallenForest.EditorTools
                     if (material.HasProperty("_OcclusionStrength")) material.SetFloat("_OcclusionStrength", 1f);
                 }
             }
-            if (metallicPath != null)
+
+            Texture2D packedMetallicSmoothness = FallenForestPbrMaskPacker.BuildMetallicSmoothness(
+                MaterialRoot + "/" + name + "_MetallicSmoothness.png",
+                metallicPath,
+                smoothnessOrRoughnessPath,
+                invertRoughness);
+            if (packedMetallicSmoothness != null && material.HasProperty("_MetallicGlossMap"))
             {
-                ConfigureLinear(metallicPath);
-                Texture2D metallic = AssetDatabase.LoadAssetAtPath<Texture2D>(metallicPath);
-                if (metallic != null && material.HasProperty("_MetallicGlossMap"))
-                {
-                    material.SetTexture("_MetallicGlossMap", metallic);
-                    material.EnableKeyword("_METALLICSPECGLOSSMAP");
-                }
+                material.SetTexture("_MetallicGlossMap", packedMetallicSmoothness);
+                if (material.HasProperty("_Metallic")) material.SetFloat("_Metallic", 1f);
+                if (material.HasProperty("_Smoothness")) material.SetFloat("_Smoothness", 1f);
+                if (material.HasProperty("_SmoothnessTextureChannel")) material.SetFloat("_SmoothnessTextureChannel", 0f);
+                material.EnableKeyword("_METALLICSPECGLOSSMAP");
             }
+            else if (material.HasProperty("_Smoothness"))
+            {
+                material.SetFloat("_Smoothness", smoothness);
+            }
+
             if (emissionPath != null)
             {
                 Texture2D emission = AssetDatabase.LoadAssetAtPath<Texture2D>(emissionPath);
@@ -147,7 +169,6 @@ namespace FallenForest.EditorTools
                     material.EnableKeyword("_EMISSION");
                 }
             }
-            if (material.HasProperty("_Smoothness")) material.SetFloat("_Smoothness", smoothness);
             EditorUtility.SetDirty(material);
             return material;
         }
