@@ -19,17 +19,18 @@ namespace FallenForest.EditorTools
             string smoothnessOrRoughnessAssetPath,
             bool invertRoughness)
         {
-            if (string.IsNullOrEmpty(metallicAssetPath) || !File.Exists(metallicAssetPath))
-                return null;
+            bool hasMetallic = !string.IsNullOrEmpty(metallicAssetPath) && File.Exists(metallicAssetPath);
+            bool hasGloss = !string.IsNullOrEmpty(smoothnessOrRoughnessAssetPath) && File.Exists(smoothnessOrRoughnessAssetPath);
+            if (!hasMetallic && !hasGloss) return null;
 
-            using Image metallic = Image.Load(metallicAssetPath);
-            using Image gloss = !string.IsNullOrEmpty(smoothnessOrRoughnessAssetPath) && File.Exists(smoothnessOrRoughnessAssetPath)
-                ? Image.Load(smoothnessOrRoughnessAssetPath)
+            using Image metallic = hasMetallic ? Image.Load(metallicAssetPath) : null;
+            using Image gloss = hasGloss ? Image.Load(smoothnessOrRoughnessAssetPath) : null;
+
+            int width = metallic != null ? metallic.Width : gloss.Width;
+            int height = metallic != null ? metallic.Height : gloss.Height;
+            Color32[] metalPixels = metallic != null
+                ? ResampleNearest(metallic.Pixels, metallic.Width, metallic.Height, width, height)
                 : null;
-
-            int width = metallic.Width;
-            int height = metallic.Height;
-            Color32[] metalPixels = metallic.Pixels;
             Color32[] glossPixels = gloss != null
                 ? ResampleNearest(gloss.Pixels, gloss.Width, gloss.Height, width, height)
                 : null;
@@ -37,7 +38,7 @@ namespace FallenForest.EditorTools
 
             for (int i = 0; i < packed.Length; i++)
             {
-                byte metal = Luminance(metalPixels[i]);
+                byte metal = metalPixels != null ? Luminance(metalPixels[i]) : (byte)0;
                 byte smooth = glossPixels != null ? Luminance(glossPixels[i]) : (byte)128;
                 if (invertRoughness) smooth = (byte)(255 - smooth);
                 packed[i] = new Color32(metal, 0, 0, smooth);
