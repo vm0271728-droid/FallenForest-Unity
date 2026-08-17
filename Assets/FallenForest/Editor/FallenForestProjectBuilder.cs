@@ -24,6 +24,7 @@ namespace FallenForest.EditorTools
             FallenForestRenderPipelineSetup.EnsureConfigured();
             FallenForestUserContentIntegrator.IntegrateBeforeSceneAssembly();
             FallenForestTreePackIntegrator.BuildAvailable();
+            FallenForestLowPolyForestIntegrator.BuildAvailable();
 
             // Structural prefab passes must finish before the final user-material pass.
             FallenForestGrassMaterialBuilder.ApplyIfAvailable();
@@ -41,6 +42,7 @@ namespace FallenForest.EditorTools
             FallenForestViewmodelCameraUrpGuard.PrepareForestBaseCamera();
             FallenForestUserContentIntegrator.PatchGeneratedForestScene();
             FallenForestTreePackIntegrator.PatchForestScene();
+            FallenForestLowPolyForestIntegrator.PatchForestScene();
             FallenForestTerrainVisualIntegrator.Configure();
             FallenForestViewmodelMotionIntegrator.Configure();
             FallenForestStreamingVideoIntegrator.ConfigureBoiledSequence();
