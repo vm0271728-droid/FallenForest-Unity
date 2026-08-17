@@ -23,6 +23,7 @@ namespace FallenForest.EditorTools
     public static class FallenForestReleaseValidator
     {
         private const string Root = "Assets/FallenForest";
+        private const string BoiledStreamingVideo = "Assets/StreamingAssets/FallenForest/Video/boiled_one_jumpscare.mp4";
 
         [MenuItem("Fallen Forest/Validate Release Content")]
         public static void ValidateFromMenu()
@@ -49,7 +50,7 @@ namespace FallenForest.EditorTools
             RequireAsset<AudioClip>(Root + "/Audio/Ambience/ambient_horror_cc0.ogg", "CC0 horror ambience layer", errors);
             RequireAsset<AudioClip>(Root + "/Audio/Screamers/jakes-screamer.mp3", "Locust jumpscare A", errors);
             RequireAsset<AudioClip>(Root + "/Audio/Screamers/the-screamer-shared-between-mallie-and-jenny.mp3", "Locust jumpscare B", errors);
-            RequireAsset<VideoClip>(Root + "/Video/boiled_one_jumpscare.mp4", "Boiled One screamer video", errors);
+            RequireNonEmptyFile(BoiledStreamingVideo, "original Boiled One screamer video", errors);
 
             string forbidden = Root + "/Audio/Screamers/amazing-grace-analog-horror.mp3";
             if (File.Exists(forbidden) || AssetDatabase.LoadAssetAtPath<AudioClip>(forbidden) != null)
@@ -111,6 +112,16 @@ namespace FallenForest.EditorTools
                 RequireSceneComponent<WindInteractor>("grass/player wind interaction", errors);
                 RequireSceneComponent<RuntimeQualityController>("mobile runtime quality controller", errors);
                 RequireSceneComponent<EndSequence>("final road ending sequence", errors);
+
+                BoiledOneSequence boiledSequence = Object.FindFirstObjectByType<BoiledOneSequence>(FindObjectsInactive.Include);
+                if (boiledSequence != null)
+                {
+                    VideoPlayer video = boiledSequence.GetComponent<VideoPlayer>();
+                    if (video == null)
+                        errors.Add("Boiled One sequence has no VideoPlayer.");
+                    else if (video.source != VideoSource.Url)
+                        errors.Add("Boiled One VideoPlayer must use URL/StreamingAssets instead of importing the H.264 MP4 as a VideoClip.");
+                }
 
                 CinematicPickupVehicle vehicle = Object.FindFirstObjectByType<CinematicPickupVehicle>(FindObjectsInactive.Include);
                 if (vehicle == null)
@@ -202,6 +213,19 @@ namespace FallenForest.EditorTools
             if (asset == null)
                 errors.Add($"Missing {label}: {path}");
             return asset;
+        }
+
+        private static void RequireNonEmptyFile(string path, string label, List<string> errors)
+        {
+            if (!File.Exists(path))
+            {
+                errors.Add($"Missing {label}: {path}");
+                return;
+            }
+
+            FileInfo info = new(path);
+            if (info.Length <= 0)
+                errors.Add($"{label} is empty: {path}");
         }
 
         private static void WarnMissing<T>(string path, string label, List<string> warnings) where T : UnityEngine.Object
