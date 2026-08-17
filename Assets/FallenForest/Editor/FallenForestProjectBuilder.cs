@@ -21,14 +21,19 @@ namespace FallenForest.EditorTools
         {
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
-            // Build exact user-derived prefabs first. This lets the scene assembler consume the
-            // real grass and creature assets instead of its bootstrap geometry wherever possible.
+            // Build exact user-derived source prefabs first.
             FallenForestUserContentIntegrator.IntegrateBeforeSceneAssembly();
 
-            // Scenes are source-generated from the runtime systems, then finalized against the
-            // latest game rules before release validation.
+            // The supplied pickup is one merged FBX; turn it into a real Rigidbody + 4 WheelCollider
+            // vehicle before any finale scene references are serialized.
+            PickupWheelMeshSplitter.BuildIfAvailable();
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+
+            // Scenes are source-generated from runtime systems, then finalized against latest rules.
             FallenForestSceneAssembler.EnsureRequiredScenesForCI();
             FallenForestUserContentIntegrator.PatchGeneratedForestScene();
+            FallenForestFinaleIntegrator.FinalizeForestEnding();
             FallenForestMenuFinalizer.FinalizeMainMenu();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
             FallenForestReleaseValidator.ValidateReleaseOrThrow();
