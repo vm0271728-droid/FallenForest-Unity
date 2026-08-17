@@ -15,6 +15,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.Video;
+using Object = UnityEngine.Object;
 
 namespace FallenForest.EditorTools
 {
