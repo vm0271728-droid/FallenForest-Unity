@@ -21,6 +21,11 @@ namespace FallenForest.EditorTools
         {
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
+            // A clean CI checkout only carries the Unity version in ProjectSettings.
+            // Build-time setup therefore owns the active URP configuration instead of
+            // inheriting whatever graphics settings happen to exist on a machine.
+            FallenForestRenderPipelineSetup.EnsureConfigured();
+
             FallenForestUserContentIntegrator.IntegrateBeforeSceneAssembly();
             FallenForestGrassMaterialBuilder.ApplyIfAvailable();
 

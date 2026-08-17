@@ -128,6 +128,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          set +e
           "$UNITY_EDITOR_PATH" \
             -batchmode \
             -nographics \
@@ -135,13 +136,15 @@ jobs:
             -projectPath "$GITHUB_WORKSPACE" \
             -logFile "$RUNNER_TEMP/unity-release-import.log"
           code=$?
-          cat "$RUNNER_TEMP/unity-release-import.log"
-          exit $code
+          set -e
+          cat "$RUNNER_TEMP/unity-release-import.log" || true
+          exit "$code"
 
       - name: Build real development-signed APK
         shell: bash
         run: |
           set -o pipefail
+          set +e
           "$UNITY_EDITOR_PATH" \
             -batchmode \
             -nographics \
@@ -150,8 +153,9 @@ jobs:
             -executeMethod FallenForest.EditorTools.FallenForestProjectBuilder.CIBuildAndroid \
             -logFile "$RUNNER_TEMP/unity-release-build.log"
           code=$?
-          cat "$RUNNER_TEMP/unity-release-build.log"
-          exit $code
+          set -e
+          cat "$RUNNER_TEMP/unity-release-build.log" || true
+          exit "$code"
 
       - name: Verify produced APK
         if: success()
