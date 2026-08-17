@@ -46,6 +46,7 @@ namespace FallenForest.Monsters
         private CameraMotion cameraMotion;
         private MonsterDirector director;
         private MonsterSpawnPoint spawnPoint;
+        private BoiledStressAudio stressAudio;
         private bool triggered;
         private float expireAt;
         private float gazeTimer;
@@ -65,6 +66,7 @@ namespace FallenForest.Monsters
             cameraMotion?.ClearForcedLookTarget();
             cameraMotion?.ClearCinematicFov();
             playerMotor?.ClearExternalSpeedMultiplier();
+            stressAudio?.StopStress();
         }
 
         public void BeginEncounter(Transform p, MonsterDirector owner, MonsterSpawnPoint point = null)
@@ -72,8 +74,9 @@ namespace FallenForest.Monsters
             player = p;
             director = owner;
             spawnPoint = point;
+            stressAudio = GetComponent<BoiledStressAudio>();
+            stressAudio?.SetIntensity(0f);
 
-            // The one rare Boiled opportunity is consumed on spawn even if the player never sees it.
             GameProgress.Instance?.MarkBoiledEncountered();
 
             if (visualRoot == null) visualRoot = transform;
@@ -99,12 +102,14 @@ namespace FallenForest.Monsters
             if (IsPlayerLookingAtMe(allowedAngle))
             {
                 gazeTimer += Time.unscaledDeltaTime;
+                stressAudio?.SetIntensity(Mathf.InverseLerp(0f, Mathf.Max(.01f, gazeConfirmationTime), gazeTimer) * .22f);
                 if (gazeTimer >= gazeConfirmationTime)
                     TriggerEncounter();
             }
             else
             {
                 gazeTimer = 0f;
+                stressAudio?.SetIntensity(0f);
             }
 
             if (!triggered && Time.time >= expireAt)
@@ -130,6 +135,8 @@ namespace FallenForest.Monsters
 
             if (wakeUpSequence == null)
                 wakeUpSequence = FindFirstObjectByType<WakeUpSequence>();
+            if (stressAudio == null)
+                stressAudio = GetComponent<BoiledStressAudio>();
         }
 
         private void FacePlayerOnce()
@@ -185,9 +192,6 @@ namespace FallenForest.Monsters
             if (viewport.z <= 0f || viewport.x < 0f || viewport.x > 1f || viewport.y < 0f || viewport.y > 1f)
                 return false;
 
-            // Require at least two independent clear rays. Solid geometry blocks normally; the
-            // user-tree foliage uses lightweight trigger volumes marked VisibilityOccluder so
-            // leaves can block gaze without becoming invisible physical walls.
             Vector3 centre = visualRoot != null ? visualRoot.position + Vector3.up * .95f : transform.position + Vector3.up * .95f;
             Vector3 lower = visualRoot != null ? visualRoot.position + Vector3.up * .35f : transform.position + Vector3.up * .35f;
             int visible = 0;
@@ -212,24 +216,22 @@ namespace FallenForest.Monsters
                 QueryTriggerInteraction.Collide);
             if (hits.Length == 0) return false;
 
-            // Avoid allocation-heavy LINQ/sorting in the encounter loop. Consume hits by nearest
-            // distance; unrelated trigger zones are ignored, explicit foliage occluders are not.
-            for (int consumed = 0; consumed < hits.Length; consumed++)
+            bool[] consumed = new bool[hits.Length];
+            for (int consumedCount = 0; consumedCount < hits.Length; consumedCount++)
             {
                 int nearest = -1;
                 float nearestDistance = float.MaxValue;
                 for (int i = 0; i < hits.Length; i++)
                 {
-                    if (hits[i].distance < 0f || hits[i].distance >= nearestDistance) continue;
+                    if (consumed[i] || hits[i].distance >= nearestDistance) continue;
                     nearestDistance = hits[i].distance;
                     nearest = i;
                 }
                 if (nearest < 0) break;
+                consumed[nearest] = true;
 
                 RaycastHit hit = hits[nearest];
-                hits[nearest].distance = -1f;
                 if (hit.collider == null) continue;
-
                 Transform hitTransform = hit.transform;
                 if (hitTransform == transform || hitTransform.IsChildOf(transform))
                     return true;
@@ -240,17 +242,12 @@ namespace FallenForest.Monsters
                         return false;
                     continue;
                 }
-
                 return false;
             }
 
             return false;
         }
 
-        /// <summary>
-        /// Flashlight exposure never triggers the cinematic by itself. It only briefly widens the
-        /// gaze cone; direct camera visibility is still mandatory.
-        /// </summary>
         public void OnIlluminated()
         {
             if (triggered || GameProgress.Instance == null) return;
@@ -269,7 +266,6 @@ namespace FallenForest.Monsters
             yield return new WaitForSecondsRealtime(reactionDelay);
             ResolvePlayerReferences();
 
-            // During the three-second focus the player may still move, but at only 33% speed.
             playerMotor?.SetExternalSpeedMultiplier(focusedMoveMultiplier);
             cameraMotion?.SetInputEnabled(false);
 
@@ -286,16 +282,19 @@ namespace FallenForest.Monsters
             while (stare < forcedStareDuration)
             {
                 stare += Time.unscaledDeltaTime;
+                float stress = Mathf.SmoothStep(.20f, 1f, Mathf.Clamp01(stare / Mathf.Max(.01f, forcedStareDuration)));
+                stressAudio?.SetIntensity(stress);
+                if (cameraMotion != null && stress > .45f)
+                    cameraMotion.AddShake(Mathf.Lerp(.025f, .085f, stress), .15f);
                 ApplySlowIrregularSway();
                 TrackHeadVerySlowly();
                 yield return null;
             }
 
+            stressAudio?.SetIntensity(1f);
             playerMotor?.ClearExternalSpeedMultiplier();
             playerMotor?.SetControlsEnabled(false);
 
-            // Eyes close while the player collapses. The creature remains physically present and
-            // visible for the entire close; only after fully closed eyes may it disappear.
             if (wakeUpSequence != null)
             {
                 yield return wakeUpSequence.PlayCollapseToBlack(collapseDuration);
@@ -313,9 +312,9 @@ namespace FallenForest.Monsters
                 }
             }
 
-            // Fully closed now: no dissolve, no visible despawn.
             foreach (Renderer r in GetComponentsInChildren<Renderer>(true)) r.enabled = false;
             foreach (Collider c in GetComponentsInChildren<Collider>(true)) c.enabled = false;
+            stressAudio?.StopStress();
 
             cameraMotion?.ClearForcedLookTarget();
             cameraMotion?.ClearCinematicFov();
@@ -342,6 +341,7 @@ namespace FallenForest.Monsters
         private void FinishWithoutTrigger()
         {
             if (triggered) return;
+            stressAudio?.StopStress();
             spawnPoint?.Release();
             director?.NotifyEncounterFinished();
             Destroy(gameObject);
@@ -349,6 +349,7 @@ namespace FallenForest.Monsters
 
         private void FinishAndDestroy()
         {
+            stressAudio?.StopStress();
             playerMotor?.ClearExternalSpeedMultiplier();
             spawnPoint?.Release();
             director?.NotifyEncounterFinished();
