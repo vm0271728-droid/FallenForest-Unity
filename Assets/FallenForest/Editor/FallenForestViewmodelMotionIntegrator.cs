@@ -28,6 +28,18 @@ namespace FallenForest.EditorTools
                 if (player == null || viewmodelCamera == null || arms == null || flashlightVisual == null)
                     throw new InvalidDataException("Viewmodel motion integration requires PlayerMotor, ViewmodelCamera, FPSArms_Final and FlashlightVisual_Final.");
 
+                Camera camera = viewmodelCamera.GetComponent<Camera>();
+                if (camera == null)
+                    throw new InvalidDataException("ViewmodelCamera object has no Camera component.");
+
+                // The canonical world camera is 75°, while the arms have their own narrow camera.
+                // A very small near plane prevents real wrist/forearm geometry from clipping during
+                // pickups and death poses without allowing the world camera to see through walls.
+                camera.fieldOfView = 61f;
+                camera.nearClipPlane = .015f;
+                camera.farClipPlane = 8f;
+                camera.useOcclusionCulling = false;
+
                 ViewmodelMotionController motion = viewmodelCamera.GetComponent<ViewmodelMotionController>();
                 if (motion == null) motion = viewmodelCamera.gameObject.AddComponent<ViewmodelMotionController>();
 
@@ -37,9 +49,10 @@ namespace FallenForest.EditorTools
                 SetObject(so, "flashlightVisualRoot", flashlightVisual);
                 so.ApplyModifiedPropertiesWithoutUndo();
 
+                EditorUtility.SetDirty(camera);
                 EditorSceneManager.MarkSceneDirty(scene);
                 EditorSceneManager.SaveScene(scene);
-                Debug.Log("Fallen Forest: first-person arms/flashlight runtime motion wired.");
+                Debug.Log("Fallen Forest: first-person arms/flashlight runtime motion wired at fixed 61 degree viewmodel FOV.");
             }
             finally
             {
