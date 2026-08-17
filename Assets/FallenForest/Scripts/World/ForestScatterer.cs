@@ -9,6 +9,8 @@ namespace FallenForest.World
     /// </summary>
     public sealed class ForestScatterer : MonoBehaviour
     {
+        private static readonly int GrassExclusionEnabled = Shader.PropertyToID("_GrassExclusionEnabled");
+
         [Header("Content")]
         [SerializeField] private GameObject[] treePrefabs;
         [SerializeField] private GameObject[] grassPrefabs;
@@ -17,7 +19,7 @@ namespace FallenForest.World
 
         [Header("Density")]
         [SerializeField, Min(100)] private int treeCount = 3250;
-        [SerializeField, Min(0)] private int grassClumpCount = 9000;
+        [SerializeField, Min(0)] private int grassClumpCount = 16000;
         [SerializeField] private int seed = 228117;
         [SerializeField, Range(.001f, .08f)] private float clusterFrequency = .012f;
         [SerializeField, Range(0f, .9f)] private float minimumClusterNoise = .20f;
@@ -133,30 +135,54 @@ namespace FallenForest.World
             bool useBatching = batchGrassMeshes && (Application.isPlaying || !keepIndividualGrassInEditor);
             GrassMeshBatcher batcher = useBatching ? new GrassMeshBatcher(grassChunkSize, generatedRoot) : null;
             int fallbackObjects = 0;
+            int acceptedGrass = 0;
+            MaterialPropertyBlock grassProperties = new();
+            grassProperties.SetFloat(GrassExclusionEnabled, 1f);
 
-            for (int i = 0; i < grassClumpCount; i++)
+            // We sample a little more than the requested count because trail rejection deliberately
+            // removes vegetation from path centers and thins it along their shoulders.
+            int attempts = Mathf.CeilToInt(grassClumpCount * 1.35f);
+            for (int i = 0; i < attempts && acceptedGrass < grassClumpCount; i++)
             {
                 Vector3 p = RandomPoint(terrainOrigin, terrainSize);
                 p.y = terrain.SampleHeight(p) + terrainOrigin.y;
+
+                float trailDensity = TrailZone.GrassDensityMultiplier(p);
+                if (trailDensity <= .001f || Random.value > trailDensity)
+                    continue;
+
                 GameObject prefab = grassPrefabs[Random.Range(0, grassPrefabs.Length)];
                 if (prefab == null) continue;
 
                 Quaternion rotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
                 float scale = Random.Range(grassScaleRange.x, grassScaleRange.y);
                 bool batched = batcher != null && batcher.Add(prefab, p, rotation, scale);
-                if (batched) continue;
+                if (batched)
+                {
+                    acceptedGrass++;
+                    continue;
+                }
 
                 GameObject go = Instantiate(prefab, p, rotation, generatedRoot);
                 go.transform.localScale *= scale;
                 spawned.Add(go);
+
+                Renderer[] renderers = go.GetComponentsInChildren<Renderer>(true);
+                for (int r = 0; r < renderers.Length; r++)
+                    renderers[r].SetPropertyBlock(grassProperties);
+
                 fallbackObjects++;
+                acceptedGrass++;
             }
 
             if (batcher != null)
             {
                 int chunks = batcher.Build();
-                Debug.Log($"Fallen Forest: grass batched into {chunks} renderer chunks; {fallbackObjects} unsupported clumps used GameObject fallback.");
+                Debug.Log($"Fallen Forest: {acceptedGrass} grass clumps batched into {chunks} renderer chunks; {fallbackObjects} unsupported clumps used GameObject fallback.");
             }
+
+            if (acceptedGrass < grassClumpCount)
+                Debug.LogWarning($"Fallen Forest: generated {acceptedGrass}/{grassClumpCount} grass clumps after trail density filtering.");
         }
 
         private bool HasSpacing(Vector2 p)
