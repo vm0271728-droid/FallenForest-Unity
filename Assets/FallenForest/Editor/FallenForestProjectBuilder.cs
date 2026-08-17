@@ -23,6 +23,7 @@ namespace FallenForest.EditorTools
 
             // Build exact user-derived source prefabs first.
             FallenForestUserContentIntegrator.IntegrateBeforeSceneAssembly();
+            FallenForestGrassMaterialBuilder.ApplyIfAvailable();
 
             // The supplied pickup is one merged FBX; turn it into a real Rigidbody + 4 WheelCollider
             // vehicle before any finale scene references are serialized.
