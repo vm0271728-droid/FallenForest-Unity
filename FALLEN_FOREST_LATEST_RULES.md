@@ -2,7 +2,7 @@
 
 This file records design decisions added after `FALLEN_FOREST_MASTER_PLAN.md` was created. A future continuation must read both files until these points are folded back into the master plan.
 
-Last synchronized: 2026-08-17 06:52 Europe/Moscow (+03:00).
+Last synchronized: 2026-08-17 07:00+ Europe/Moscow (+03:00).
 
 ## Document placement and presentation — fixed
 
@@ -29,10 +29,13 @@ Branch `feature/document-fireflies-grass-clearance` currently stages the code im
 
 - `DocumentSpawner.cs` keeps generated documents off registered `TrailZone` volumes and still selects all 10 required slots.
 - Each uncollected document gets a shader-driven `GrassExclusionEmitter`, so grass clears in a soft circular falloff even when the grass is mesh-batched.
-- Each spawned document independently rolls the fixed **45% firefly chance**; a successful roll creates **4–6** very small dim fireflies with a deliberately tiny local glow and distance culling.
+- Each spawned document independently rolls the fixed **45% firefly chance**; a successful roll creates **4–6** very small dim fireflies.
+- `DocumentFireflies.cs` was further reduced for Android: default visibility is only about 12.5m, the fireflies are tiny, use a subtle scale pulse, and **do not create a real point light by default**. A physical glow exists only as an optional extremely weak setting. This keeps them atmospheric rather than a quest beacon.
 - `TrailZone.cs` exposes a smooth vegetation-density gradient: effectively no grass on the path volume, sparse grass beside it, then dense grass farther into the forest.
-- `ForestScatterer.cs` staging raises the default grass target from 9000 to 16000 clumps and applies the trail density gradient while keeping mesh batching for Android.
+- `ForestScatterer.cs` staging raises the default grass target from 9000 to 16000 clumps, prevents trees from blocking registered trail volumes, and applies the trail density gradient while keeping mesh batching for Android.
 - `ForestWindURP.shader` staging supports soft stochastic grass suppression around documents instead of a hard square hole.
+- `TrailNetworkGenerator.cs` now creates a deterministic network of narrow terrain-following dirt trails. Catmull-Rom path ribbons follow the Terrain height and every path segment creates a `TrailZone`, so document exclusion, tree exclusion and grass thinning all use the same physical trail geometry.
+- Trail generation cleanup was hardened: generated ribbons/zones live under one generated root and runtime mesh objects are explicitly cleaned before regeneration.
 
 These changes are staged on a feature branch and are **not yet claimed compiled** until the Unity Android CI reaches a real project compile.
 
@@ -47,6 +50,16 @@ Branch `feature/world-terrain-relief` contains `TerrainReliefGenerator.cs`:
 - intended generation/baking before release, not expensive per-frame terrain deformation.
 
 This terrain branch is also staged and must be integrated into the real generated/committed Forest scene before being considered final.
+
+## Ordered world-generation integration — staged
+
+Branch `feature/world-generation-integration` was created from the document/trail branch and also contains the uneven terrain generator.
+
+It adds `WorldGenerationCoordinator.cs` with an early execution order and an explicit final-world sequence:
+
+`terrain relief -> terrain-following trails -> trees + dense grass -> normal DocumentSpawner Start`
+
+The purpose is to ensure trail meshes and their exclusion zones are based on the final uneven terrain, forest objects are generated around those trails, and document candidate validation samples the finished forest rather than stale flat-world positions. This branch is the preferred place to consolidate the terrain/trail/forest work before it is eventually compile-tested and merged.
 
 ## Finale safety and flashlight presentation — staged
 
@@ -103,7 +116,7 @@ Main commit `18f9898bf16c4a8f59c1c34a5fa0c1ae0b5ac6ad` therefore bypasses Builda
 - install module IDs `android`, `android-sdk-ndk-tools`, `android-open-jdk` in the same Hub command;
 - validate Editor executable, Android editor extension, SDK platform-tools, NDK `source.properties` and OpenJDK before activation/compile.
 
-GitHub Actions run **#30**, ID `31992485117`, was started from that commit. At the time this file was updated it had passed checkout, CC0 audio, credentials and disk cleanup, passed Unity Hub/Xvfb installation, and was actively executing the direct Hub Editor + Android module installation step. Do not assume its eventual result in another chat; always fetch the newest run first.
+GitHub Actions run **#30**, ID `31992485117`, was started from that commit. At the latest status check while this file was updated it had passed checkout, CC0 audio, credentials and disk cleanup, passed Unity Hub/Xvfb installation, and was still actively executing the direct Hub Editor + Android module installation step. Do not assume its eventual result in another chat; always fetch the newest run first.
 
 ## Current integration rule
 
