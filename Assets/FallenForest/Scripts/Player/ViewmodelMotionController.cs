@@ -1,14 +1,18 @@
+using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace FallenForest.Player
 {
     /// <summary>
-    /// Mobile-friendly physical first-person presentation for the supplied arms and flashlight.
-    /// Camera turns lead the hands, the real flashlight Light lags behind, movement is asymmetric,
-    /// and cinematics can temporarily override the pose without teleporting the viewmodel.
+    /// Physical first-person presentation for the supplied rigged arms and flashlight.
+    /// Camera turns lead the hands, the real Light lags behind, named wrist/finger bones are posed,
+    /// and pickups/death cinematics can temporarily override the pose without teleporting meshes.
     /// </summary>
     public sealed class ViewmodelMotionController : MonoBehaviour
     {
+        private enum InteractionMode { None, FlashlightPickup, DocumentPickup }
+
         [SerializeField] private PlayerMotor player;
         [SerializeField] private Transform armsRoot;
         [SerializeField] private Transform flashlightVisualRoot;
@@ -45,6 +49,13 @@ namespace FallenForest.Player
         private float cinematicBlend;
         private float cinematicBlendTarget;
         private float cinematicBlendSpeed = 12f;
+
+        private InteractionMode interactionMode;
+        private float interactionProgress;
+        private readonly Dictionary<Transform, Quaternion> handBindRotations = new();
+        private Transform leftWrist, rightWrist, leftPalm, rightPalm;
+        private readonly List<Transform> leftFingerBones = new();
+        private readonly List<Transform> rightFingerBones = new();
 
         private void Awake()
         {
@@ -95,8 +106,13 @@ namespace FallenForest.Player
                 cinematicBlendTarget,
                 Mathf.Max(.01f, cinematicBlendSpeed) * dt);
 
-            Vector3 armsGameplayPos = armsBasePosition + new Vector3(horizontal, vertical, Mathf.Sin(phase) * bobAmplitude * .12f) + runLower;
-            Quaternion armsGameplayRot = armsBaseRotation * armsLag * Quaternion.Euler(speed01 * 1.5f + idleGrip * 1.2f, idleGrip * -1.1f, roll + idleGrip * 2.1f);
+            GetInteractionRootPose(out Vector3 interactionPos, out Vector3 interactionEuler, out Vector3 interactionFlashPos, out Vector3 interactionFlashEuler);
+
+            Vector3 armsGameplayPos = armsBasePosition + new Vector3(horizontal, vertical, Mathf.Sin(phase) * bobAmplitude * .12f) + runLower + interactionPos;
+            Quaternion armsGameplayRot = armsBaseRotation * armsLag * Quaternion.Euler(
+                speed01 * 1.5f + idleGrip * 1.2f,
+                idleGrip * -1.1f,
+                roll + idleGrip * 2.1f) * Quaternion.Euler(interactionEuler);
             Vector3 armsCinematicPos = armsBasePosition + cinematicArmsPosition;
             Quaternion armsCinematicRot = armsBaseRotation * Quaternion.Euler(cinematicArmsEuler);
 
@@ -110,11 +126,11 @@ namespace FallenForest.Player
 
             if (gameplayFlashlightRoot != null)
             {
-                Vector3 gameplayPosition = gameplayFlashlightBasePosition + new Vector3(horizontal * .30f, vertical * .35f, 0f) + runLower * .45f;
+                Vector3 gameplayPosition = gameplayFlashlightBasePosition + new Vector3(horizontal * .30f, vertical * .35f, 0f) + runLower * .45f + interactionFlashPos;
                 Quaternion gameplayRotation = gameplayFlashlightBaseRotation * Quaternion.Euler(
                     -lookLag.x * .46f,
                     -lookLag.y * .82f,
-                    roll * .40f + lookLag.y * .20f);
+                    roll * .40f + lookLag.y * .20f) * Quaternion.Euler(interactionFlashEuler);
                 Vector3 cinematicPosition = gameplayFlashlightBasePosition + cinematicFlashlightPosition;
                 Quaternion cinematicRotation = gameplayFlashlightBaseRotation * Quaternion.Euler(cinematicFlashlightEuler);
                 gameplayFlashlightRoot.localPosition = Vector3.Lerp(
@@ -135,6 +151,42 @@ namespace FallenForest.Player
                 flashlightVisualRoot.localPosition = Vector3.Lerp(flashlightVisualRoot.localPosition, targetPosition, 1f - Mathf.Exp(-18f * dt));
                 flashlightVisualRoot.localRotation = Quaternion.Slerp(flashlightVisualRoot.localRotation, targetRotation, 1f - Mathf.Exp(-18f * dt));
             }
+
+            ApplyHandSkeleton(speed01, idleGrip);
+        }
+
+        public IEnumerator PlayFlashlightPickup(float duration = .72f)
+        {
+            if (interactionMode != InteractionMode.None) yield break;
+            interactionMode = InteractionMode.FlashlightPickup;
+            interactionProgress = 0f;
+            float elapsed = 0f;
+            while (elapsed < duration)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                interactionProgress = Mathf.Clamp01(elapsed / Mathf.Max(.05f, duration));
+                yield return null;
+            }
+            interactionProgress = 1f;
+            interactionMode = InteractionMode.None;
+            interactionProgress = 0f;
+        }
+
+        public IEnumerator PlayDocumentPickup(float duration = .82f)
+        {
+            if (interactionMode != InteractionMode.None) yield break;
+            interactionMode = InteractionMode.DocumentPickup;
+            interactionProgress = 0f;
+            float elapsed = 0f;
+            while (elapsed < duration)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                interactionProgress = Mathf.Clamp01(elapsed / Mathf.Max(.05f, duration));
+                yield return null;
+            }
+            interactionProgress = 1f;
+            interactionMode = InteractionMode.None;
+            interactionProgress = 0f;
         }
 
         public void SetCinematicPose(
@@ -161,6 +213,98 @@ namespace FallenForest.Player
         }
 
         public bool IsInCinematicPose => cinematicPose || cinematicBlend > .001f;
+
+        private void GetInteractionRootPose(out Vector3 armsPos, out Vector3 armsEuler, out Vector3 flashlightPos, out Vector3 flashlightEuler)
+        {
+            armsPos = Vector3.zero;
+            armsEuler = Vector3.zero;
+            flashlightPos = Vector3.zero;
+            flashlightEuler = Vector3.zero;
+            if (interactionMode == InteractionMode.None) return;
+
+            float p = Mathf.Clamp01(interactionProgress);
+            float reach = Mathf.Sin(p * Mathf.PI);
+            float settle = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(.58f, 1f, p));
+
+            if (interactionMode == InteractionMode.FlashlightPickup)
+            {
+                armsPos = new Vector3(.035f, -.055f, .17f) * reach + new Vector3(.018f, -.01f, .012f) * settle;
+                armsEuler = new Vector3(15f, -9f, 13f) * reach + new Vector3(-3f, 2f, -4f) * settle;
+                flashlightPos = new Vector3(.04f, -.02f, .035f) * settle;
+                flashlightEuler = new Vector3(-7f, 6f, -9f) * settle;
+            }
+            else
+            {
+                armsPos = new Vector3(-.055f, -.025f, .205f) * reach;
+                armsEuler = new Vector3(9f, 13f, -17f) * reach;
+                flashlightPos = new Vector3(.028f, -.045f, -.035f) * reach;
+                flashlightEuler = new Vector3(10f, 17f, -13f) * reach;
+            }
+        }
+
+        private void ApplyHandSkeleton(float speed01, float idleGrip)
+        {
+            if (handBindRotations.Count == 0) return;
+            foreach (KeyValuePair<Transform, Quaternion> pair in handBindRotations)
+                if (pair.Key != null) pair.Key.localRotation = pair.Value;
+
+            FlashlightController controller = gameplayFlashlightRoot != null
+                ? gameplayFlashlightRoot.GetComponent<FlashlightController>()
+                : null;
+            bool holdingFlashlight = controller != null && controller.Acquired;
+
+            if (rightWrist != null && handBindRotations.TryGetValue(rightWrist, out Quaternion rightWristBind))
+            {
+                Vector3 grip = holdingFlashlight ? new Vector3(-4.5f, 5f, 7f) : Vector3.zero;
+                if (interactionMode == InteractionMode.FlashlightPickup)
+                    grip += new Vector3(14f, -12f, 18f) * Mathf.Sin(interactionProgress * Mathf.PI);
+                rightWrist.localRotation = rightWristBind * Quaternion.Euler(grip);
+            }
+
+            if (leftWrist != null && handBindRotations.TryGetValue(leftWrist, out Quaternion leftWristBind))
+            {
+                Vector3 pose = new(idleGrip * 1.3f, 0f, idleGrip * -1.8f);
+                if (interactionMode == InteractionMode.DocumentPickup)
+                    pose += new Vector3(19f, 10f, -24f) * Mathf.Sin(interactionProgress * Mathf.PI);
+                leftWrist.localRotation = leftWristBind * Quaternion.Euler(pose);
+            }
+
+            float cinematicBrace = cinematicBlend * -7f;
+            float rightCurl = holdingFlashlight ? 12f : 2f;
+            float leftCurl = 1.5f + idleGrip * 1.5f;
+
+            if (interactionMode == InteractionMode.FlashlightPickup)
+            {
+                float grip = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(.35f, .72f, interactionProgress));
+                rightCurl = Mathf.Lerp(-8f, 18f, grip);
+            }
+            if (interactionMode == InteractionMode.DocumentPickup)
+            {
+                float grip = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(.40f, .72f, interactionProgress));
+                leftCurl = Mathf.Lerp(-9f, 14f, grip);
+            }
+
+            ApplyFingerCurl(rightFingerBones, rightCurl + cinematicBrace, true);
+            ApplyFingerCurl(leftFingerBones, leftCurl + cinematicBrace, false);
+
+            if (rightPalm != null && handBindRotations.TryGetValue(rightPalm, out Quaternion rp))
+                rightPalm.localRotation = rp * Quaternion.Euler(holdingFlashlight ? new Vector3(0f, -2f, 3f) : Vector3.zero);
+            if (leftPalm != null && handBindRotations.TryGetValue(leftPalm, out Quaternion lp))
+                leftPalm.localRotation = lp * Quaternion.Euler(new Vector3(0f, idleGrip, -idleGrip));
+        }
+
+        private void ApplyFingerCurl(List<Transform> bones, float curl, bool right)
+        {
+            for (int i = 0; i < bones.Count; i++)
+            {
+                Transform bone = bones[i];
+                if (bone == null || !handBindRotations.TryGetValue(bone, out Quaternion bind)) continue;
+                string lower = bone.name.ToLowerInvariant();
+                float multiplier = lower.Contains("thumb") ? .55f : 1f;
+                float side = right ? 1f : -1f;
+                bone.localRotation = bind * Quaternion.Euler(curl * multiplier, 0f, side * curl * .10f);
+            }
+        }
 
         private float EvaluateIdleVariant(float dt, float speed01)
         {
@@ -219,6 +363,7 @@ namespace FallenForest.Player
             {
                 armsBasePosition = armsRoot.localPosition;
                 armsBaseRotation = armsRoot.localRotation;
+                CaptureHandRig();
             }
             if (flashlightVisualRoot != null)
             {
@@ -231,6 +376,40 @@ namespace FallenForest.Player
                 gameplayFlashlightBaseRotation = gameplayFlashlightRoot.localRotation;
             }
             captured = armsRoot != null || gameplayFlashlightRoot != null || flashlightVisualRoot != null;
+        }
+
+        private void CaptureHandRig()
+        {
+            handBindRotations.Clear();
+            leftFingerBones.Clear();
+            rightFingerBones.Clear();
+            leftWrist = rightWrist = leftPalm = rightPalm = null;
+
+            foreach (Transform bone in armsRoot.GetComponentsInChildren<Transform>(true))
+            {
+                string name = bone.name;
+                if (name == "L_wrist") leftWrist = bone;
+                else if (name == "R_wrist") rightWrist = bone;
+                else if (name == "L_palm") leftPalm = bone;
+                else if (name == "R_palm") rightPalm = bone;
+
+                bool leftFinger = IsFingerBone(name, "L_");
+                bool rightFinger = IsFingerBone(name, "R_");
+                if (leftFinger) leftFingerBones.Add(bone);
+                if (rightFinger) rightFingerBones.Add(bone);
+                if (leftFinger || rightFinger || name == "L_wrist" || name == "R_wrist" || name == "L_palm" || name == "R_palm")
+                    handBindRotations[bone] = bone.localRotation;
+            }
+        }
+
+        private static bool IsFingerBone(string name, string side)
+        {
+            if (!name.StartsWith(side, System.StringComparison.Ordinal)) return false;
+            return name.IndexOf("thumb", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   name.IndexOf("point", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   name.IndexOf("middle", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   name.IndexOf("ring", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   name.IndexOf("pink", System.StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }
