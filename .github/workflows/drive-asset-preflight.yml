@@ -21,6 +21,16 @@ jobs:
           fetch-depth: 1
           lfs: false
 
+      - name: Install archive tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          if ! sudo DEBIAN_FRONTEND=noninteractive apt-get install -y p7zip-full; then
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y 7zip
+          fi
+          command -v 7z || command -v 7zz || command -v 7za
+
       - name: Download canonical archives from Google Drive
         shell: bash
         run: |
@@ -66,5 +76,8 @@ jobs:
           require_file 'Assets/FallenForest/Art/Vegetation/UserTrees/BlackSpruce/Source/zzz_LODs/LOD4/Picea mariana HD_Arctic mat 100_LOD4.fbx'
           require_file Assets/FallenForest/Art/Vegetation/UserTrees/DeadFirs/Source/firs.obj
           require_file 'Assets/FallenForest/Art/Vegetation/UserTrees/LowPolyForest/Source/LOW POLY FOREST TREE PACK.rar'
+          require_file Assets/FallenForest/Art/Vegetation/UserTrees/LowPolyForest/Source/Extracted/Tree_Pack.fbx
+          require_file Assets/FallenForest/Art/Vegetation/UserTrees/LowPolyForest/Source/Extracted/Tree_Pack.obj
+          require_file Assets/FallenForest/Art/Vegetation/UserTrees/LowPolyForest/Source/Extracted/Tree_Pack.mtl
           test ! -f Assets/FallenForest/Audio/Screamers/amazing-grace-analog-horror.mp3
           echo 'Canonical Drive payloads imported and validated successfully.'
