@@ -7,6 +7,7 @@ using FallenForest.World;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 
 namespace FallenForest.EditorTools
@@ -37,6 +38,9 @@ namespace FallenForest.EditorTools
 
                 if (player == null || camera == null || flashlight == null)
                     throw new InvalidDataException("Canonical runtime wiring requires PlayerMotor, MainCamera and FlashlightController.");
+
+                UniversalAdditionalCameraData cameraData = camera.GetUniversalAdditionalCameraData();
+                cameraData.renderPostProcessing = true;
 
                 SerializedObject flashSo = new(flashlight);
                 SetObject(flashSo, "rayOrigin", flashlight.transform);
@@ -81,6 +85,7 @@ namespace FallenForest.EditorTools
                 SetObject(eyeSo, "playerCamera", camera);
                 eyeSo.ApplyModifiedPropertiesWithoutUndo();
 
+                EditorUtility.SetDirty(camera);
                 EditorSceneManager.MarkSceneDirty(scene);
                 EditorSceneManager.SaveScene(scene);
                 Debug.Log("Fallen Forest: canonical flashlight, exposure, viewmodel, jumpscare and White Eyes wiring completed.");
