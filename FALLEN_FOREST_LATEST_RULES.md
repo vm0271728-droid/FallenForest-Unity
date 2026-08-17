@@ -2,7 +2,31 @@
 
 This file records design decisions added after `FALLEN_FOREST_MASTER_PLAN.md` was created. A future continuation must read both files until these points are folded back into the master plan.
 
-Last synchronized: 2026-08-17 07:00+ Europe/Moscow (+03:00).
+Last synchronized: 2026-08-17 09:25+ Europe/Moscow (+03:00).
+
+## Canonical FPS / monster animation specification — NEW
+
+A dedicated canonical implementation document now exists:
+
+`FALLEN_FOREST_FPS_MONSTER_ANIMATION_TZ.md`
+
+For first-person arms, flashlight presentation, document pickup, viewmodel/FOV rules, Boiled One gaze behaviour, Locust hiding/rage/locomotion and both player death animations, **that file is the newest detailed specification and overrides older conflicting wording in the master plan**.
+
+Critical newest rules include:
+- normal gameplay world FOV fixed at 75°; remove the old freely adjustable player FOV setting;
+- hands/flashlight use a dedicated fixed-FOV viewmodel presentation, tuned around 60–62° and framed so no missing torso/arm cutoffs are visible;
+- flashlight hand has controlled horizontal/vertical camera-turn lag, spring return, tiny overshoot and real beam lag because the light follows the flashlight rather than the camera;
+- custom flashlight pickup, idle variants, walk/run motion and left-hand document pickup are required;
+- Boiled is not humanoid: it has no normal shoulders or legs and only performs a tiny slow sway;
+- Boiled gaze event must be blocked by foliage/branches/trees/rocks or other real visual occlusion;
+- when Boiled is truly noticed, player movement is reduced by 67% rather than disabled, breathing accelerates, mild tinnitus builds, and Boiled disappears exactly while the eyes are fully closed;
+- Locust is approximately 2.3× player height, has 2 far / 1 medium / 2 close hiding animations, and distance logic remains active even while it is hiding;
+- approaching a hiding/retreating Locust can trigger Rage;
+- in a close encounter, backing away to roughly 85% of the configured medium-distance threshold permits disengagement;
+- Locust uses its very long arms as ground supports during chase locomotion instead of running like a scaled-up human;
+- both Locust death sequences include explicit FPS-hand animation and a physically dropped, still-lit flashlight;
+- rear death: player is pierced from behind, drops flashlight, grabs the piercing Locust hand/arm and loses grip as strength fades;
+- front death: chest impalement knocks the player down, flashlight drops, player panics/flails defensively, strength rapidly fades, then Locust brings its head close while tinnitus/red fade leads to black.
 
 ## Document placement and presentation — fixed
 
@@ -104,19 +128,22 @@ Branch `feature/ui-startup-polish` updates the warning copy to the intended fina
 
 ## Current Android CI strategy — active
 
-The earlier standalone experimental Unity CLI path repeatedly failed installing Unity 6 Android NDK r27c. `buildalon/unity-setup@v2` was also tested but incorrectly reported that Unity Hub was absent on the 2026 Ubuntu runner even after Unity Hub 3.20.1 had been installed successfully.
+The earlier standalone experimental Unity CLI path repeatedly failed installing Unity 6 Android NDK r27c. `buildalon/unity-setup@v2` was also tested but incorrectly reported that Unity Hub was absent on the 2026 Ubuntu runner even after Unity Hub had installed successfully.
 
-Main commit `18f9898bf16c4a8f59c1c34a5fa0c1ae0b5ac6ad` therefore bypasses Buildalon setup and follows Unity's documented Linux Hub CLI syntax directly:
-
+Direct Linux Hub CLI under `xvfb-run` is still the active strategy:
 - install `unityhub` + `xvfb`;
 - use Linux syntax `unityhub --headless ...`;
-- execute Hub under `xvfb-run -a` because the Hub executable is Electron-based and the hosted runner has no normal X display;
-- set the Hub install path under `$HOME/Unity/Hub/Editor`;
-- install Unity `6000.0.76f1` with changeset `6f7f9e1c9e8a`;
-- install module IDs `android`, `android-sdk-ndk-tools`, `android-open-jdk` in the same Hub command;
+- set install path under `$HOME/Unity/Hub/Editor`;
+- install Unity `6000.0.76f1` changeset `6f7f9e1c9e8a`;
 - validate Editor executable, Android editor extension, SDK platform-tools, NDK `source.properties` and OpenJDK before activation/compile.
 
-GitHub Actions run **#30**, ID `31992485117`, was started from that commit. At the latest status check while this file was updated it had passed checkout, CC0 audio, credentials and disk cleanup, passed Unity Hub/Xvfb installation, and was still actively executing the direct Hub Editor + Android module installation step. Do not assume its eventual result in another chat; always fetch the newest run first.
+GitHub Actions run #30 (`31992485117`) exposed a specific hang: Unity Hub reached an interactive prompt asking whether to install child module `android-open-jdk-17.0.18+8`. Because GitHub Actions has no interactive stdin response, the install waited indefinitely. The DBus warnings printed before that prompt were not the actual blocker.
+
+The user manually cancelled that stuck attempt. A re-run was started, then main commit `1115e8b256703054f12a7e76768e1d2d2237cab3` fixed the workflow to use the documented noninteractive Android-parent form:
+
+`--module android --childModules`
+
+This should install the Android SDK/NDK/OpenJDK child modules without prompting. The workflow retains `cancel-in-progress: true`, so the workflow-changing commit should supersede the redundant rerun. Do not assume success in another chat: fetch the newest Actions run and inspect the actual steps first.
 
 ## Current integration rule
 
