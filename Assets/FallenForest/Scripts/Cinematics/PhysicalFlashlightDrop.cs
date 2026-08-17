@@ -18,6 +18,10 @@ namespace FallenForest.Cinematics
             if (controller == null || !controller.Acquired || controller.VisualRoot == null)
                 return null;
 
+            // Death choreography always requires a live beam, even if the player had manually
+            // toggled the flashlight off immediately before the attack.
+            controller.SetOn(true);
+
             GameObject sourceVisual = controller.VisualRoot;
             Transform sourceTransform = sourceVisual.transform;
             GameObject root = new(objectName);
@@ -60,7 +64,7 @@ namespace FallenForest.Cinematics
 
         private static void CopyLight(Light source, Transform parent)
         {
-            if (source == null || !source.enabled) return;
+            if (source == null) return;
             GameObject beamObject = new("DroppedBeam");
             beamObject.transform.SetPositionAndRotation(source.transform.position, source.transform.rotation);
             beamObject.transform.SetParent(parent, true);
