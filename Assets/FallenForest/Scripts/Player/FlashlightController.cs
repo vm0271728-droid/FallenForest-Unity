@@ -5,6 +5,7 @@ namespace FallenForest.Player
     public sealed class FlashlightController : MonoBehaviour
     {
         [SerializeField] private Light flashlight;
+        [SerializeField] private GameObject visualRoot;
         [SerializeField] private float maxDistance = 55f;
         [SerializeField] private LayerMask detectionMask = ~0;
         [SerializeField] private Transform rayOrigin;
@@ -56,10 +57,18 @@ namespace FallenForest.Player
             rayOrigin = origin != null ? origin : transform;
         }
 
+        public void SetVisualRoot(GameObject root)
+        {
+            visualRoot = root;
+            ApplyState();
+        }
+
         private void ApplyState()
         {
             if (flashlight != null)
                 flashlight.enabled = Acquired && IsOn;
+            if (visualRoot != null)
+                visualRoot.SetActive(Acquired);
         }
 
         public bool IsIlluminating(Collider target)
