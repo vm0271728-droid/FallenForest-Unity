@@ -47,106 +47,83 @@ jobs:
           set -euo pipefail
           echo 'Disk before cleanup:'
           df -h /
-          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet /usr/local/share/boost || true
+          sudo rm -rf /opt/ghc /usr/share/dotnet /usr/local/share/boost || true
           docker system prune -af >/dev/null 2>&1 || true
           sudo apt-get clean || true
           echo 'Disk after cleanup:'
           df -h /
 
-      - name: Install official Unity CLI
+      - name: Install Unity Hub and Xvfb
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.local/bin:$PATH"
-          unity --version
+          curl -fsSL https://hub.unity3d.com/linux/keys/public | gpg --dearmor | sudo tee /usr/share/keyrings/Unity_Technologies_ApS.gpg >/dev/null
+          echo 'deb [signed-by=/usr/share/keyrings/Unity_Technologies_ApS.gpg] https://hub-dist.unity3d.com/artifactory/hub-debian-prod-local stable main' | sudo tee /etc/apt/sources.list.d/unityhub.list >/dev/null
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y unityhub xvfb
 
-      - name: Install Unity 6.0.76f1 editor
-        shell: bash
-        run: |
-          set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
-          unity install 6000.0.76f1 \
-            -c 6f7f9e1c9e8a \
-            --accept-eula \
-            --format ndjson
-          unity editors -i --format json || true
-
-      - name: Install Android Build Support and child modules
-        shell: bash
-        run: |
-          set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
-
-          editor="$(find "$HOME" -type f -path '*/6000.0.76f1/Editor/Unity' -perm -111 -print -quit 2>/dev/null || true)"
-          if [ -z "$editor" ]; then
-            editor="$(find /opt -type f -path '*/6000.0.76f1/Editor/Unity' -perm -111 -print -quit 2>/dev/null || true)"
+          if [ -x /usr/lib/unityhub/unityhub ]; then
+            hub=/usr/lib/unityhub/unityhub
+          elif [ -x /opt/unityhub/unityhub ]; then
+            hub=/opt/unityhub/unityhub
+          else
+            hub="$(command -v unityhub)"
           fi
-          if [ -z "$editor" ]; then
-            echo 'Unity 6000.0.76f1 installed, but Editor executable could not be located.' >&2
-            find "$HOME" -maxdepth 8 -type f -name Unity -perm -111 -print 2>/dev/null || true
+          test -x "$hub" || { echo 'Unity Hub package installed but executable was not found.' >&2; exit 1; }
+
+          licensing_client="$(find "$(dirname "$hub")" -maxdepth 5 -type f -name Unity.Licensing.Client -perm -111 -print -quit 2>/dev/null || true)"
+          test -n "$licensing_client" || {
+            echo "Unity.Licensing.Client was not found under the real Hub directory: $(dirname "$hub")" >&2
+            find "$(dirname "$hub")" -maxdepth 5 -type f -iname '*Licensing*' -print 2>/dev/null | head -80 || true
             exit 1
-          fi
+          }
 
+          echo "UNITY_HUB_PATH=$hub" >> "$GITHUB_ENV"
+          echo "Unity Hub installed at: $hub"
+          echo "Unity Licensing Client: $licensing_client"
+          xvfb-run -a "$hub" --headless help --errors | head -80
+
+      - name: Install Unity 6.0.76f1 and Android modules with Hub CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_root="$HOME/Unity/Hub/Editor"
+          mkdir -p "$install_root"
+          xvfb-run -a "$UNITY_HUB_PATH" --headless install-path -s "$install_root" --errors
+          xvfb-run -a "$UNITY_HUB_PATH" --headless install \
+            --version 6000.0.76f1 \
+            --changeset 6f7f9e1c9e8a \
+            --module android \
+            --childModules \
+            --errors
+          xvfb-run -a "$UNITY_HUB_PATH" --headless editors -i --errors || true
+
+          editor="$install_root/6000.0.76f1/Editor/Unity"
+          if [ ! -x "$editor" ]; then
+            editor="$(find "$HOME/Unity" -type f -path '*/6000.0.76f1/Editor/Unity' -perm -111 -print -quit 2>/dev/null || true)"
+          fi
+          test -x "$editor" || {
+            echo 'Unity 6000.0.76f1 did not produce an Editor executable.' >&2
+            find "$HOME/Unity" -maxdepth 8 -type f -name Unity -perm -111 -print 2>/dev/null || true
+            exit 1
+          }
           echo "UNITY_EDITOR_PATH=$editor" >> "$GITHUB_ENV"
           echo "Resolved Unity Editor: $editor"
 
-          android_player="$(dirname "$editor")/Data/PlaybackEngines/AndroidPlayer"
-
-          # First let Unity's own experimental CLI install everything it can. On beta.5 the r27c
-          # extractor can fail on a fresh Linux runner even after the SDK/JDK/base Android module
-          # have been installed successfully, so a non-zero result here is not immediately fatal.
-          set +e
-          unity install-modules \
-            -e 6000.0.76f1 \
-            -m android \
-            --cm \
-            --accept-eula \
-            --format ndjson
-          unity_module_rc=$?
-          set -e
-          echo "Unity install-modules exit code: $unity_module_rc"
-
-          test -d "$android_player" || { echo "Android Build Support directory missing: $android_player" >&2; exit 1; }
-          test -f "$android_player/UnityEditor.Android.Extensions.dll" || {
-            echo 'Base Android Build Support did not install.' >&2
-            find "$android_player" -maxdepth 2 -type f | head -80 || true
-            exit 1
-          }
-          test -d "$android_player/SDK/platform-tools" || { echo 'Unity Android SDK child module is missing or incomplete.' >&2; exit 1; }
-          test -x "$android_player/OpenJDK/bin/java" || { echo 'Unity OpenJDK child module is missing or incomplete.' >&2; exit 1; }
-
-          # Unity 6.0.76f1 metadata asks for NDK r27c. If the Unity CLI hit its known extraction-path
-          # failure, use the already-installed official Android command-line tools to install the
-          # exact side-by-side r27c package, then place that toolchain where Unity expects it.
-          if [ ! -f "$android_player/NDK/source.properties" ]; then
-            echo 'Unity CLI did not finish NDK r27c; installing exact r27c with Android sdkmanager fallback.'
-            sdkmanager="$(find "$android_player/SDK/cmdline-tools" -type f -path '*/bin/sdkmanager' -perm -111 -print 2>/dev/null | sort -V | tail -1)"
-            test -n "$sdkmanager" || { echo 'sdkmanager was not installed by Unity Android SDK tools.' >&2; exit 1; }
-
-            export JAVA_HOME="$android_player/OpenJDK"
-            export PATH="$JAVA_HOME/bin:$PATH"
-
-            yes | "$sdkmanager" --sdk_root="$android_player/SDK" --licenses >/dev/null || true
-            "$sdkmanager" --sdk_root="$android_player/SDK" "ndk;27.2.12479018"
-
-            side_ndk="$android_player/SDK/ndk/27.2.12479018"
-            test -f "$side_ndk/source.properties" || {
-              echo 'sdkmanager completed but r27c source.properties is missing.' >&2
-              find "$android_player/SDK/ndk" -maxdepth 2 -type f -name source.properties -print || true
-              exit 1
-            }
-
-            rm -rf "$android_player/NDK"
-            mkdir -p "$android_player/NDK"
-            cp -a "$side_ndk"/. "$android_player/NDK"/
-          fi
-
-          test -f "$android_player/NDK/source.properties" || { echo 'Unity Android NDK is missing or incomplete after fallback.' >&2; exit 1; }
+      - name: Verify Unity Android installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x "$UNITY_EDITOR_PATH" || { echo 'Unity editor executable is missing.' >&2; exit 1; }
+          android_player="$(dirname "$UNITY_EDITOR_PATH")/Data/PlaybackEngines/AndroidPlayer"
+          test -d "$android_player" || { echo "Android Build Support missing: $android_player" >&2; exit 1; }
+          test -f "$android_player/UnityEditor.Android.Extensions.dll" || { echo 'Unity Android editor extension missing.' >&2; exit 1; }
+          test -d "$android_player/SDK/platform-tools" || { echo 'Unity Android SDK missing/incomplete.' >&2; exit 1; }
+          test -f "$android_player/NDK/source.properties" || { echo 'Unity Android NDK missing/incomplete.' >&2; find "$android_player/NDK" -maxdepth 2 -type f -print 2>/dev/null | head -40 || true; exit 1; }
+          test -x "$android_player/OpenJDK/bin/java" || { echo 'Unity OpenJDK missing/incomplete.' >&2; exit 1; }
           grep -E 'Pkg.Revision|Pkg.Desc' "$android_player/NDK/source.properties" || cat "$android_player/NDK/source.properties"
           "$android_player/OpenJDK/bin/java" -version
-          echo 'Android toolchain validation passed.'
+          echo 'Unity Android toolchain validation passed.'
           df -h /
 
       - name: Activate Unity Personal on the cloud runner
