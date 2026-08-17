@@ -53,42 +53,56 @@ jobs:
           echo 'Disk after cleanup:'
           df -h /
 
-      - name: Preinstall Unity Hub and provide Buildalon compatibility path
+      - name: Install Unity Hub and Xvfb
         shell: bash
         run: |
           set -euo pipefail
           curl -fsSL https://hub.unity3d.com/linux/keys/public | gpg --dearmor | sudo tee /usr/share/keyrings/Unity_Technologies_ApS.gpg >/dev/null
           echo 'deb [signed-by=/usr/share/keyrings/Unity_Technologies_ApS.gpg] https://hub-dist.unity3d.com/artifactory/hub-debian-prod-local stable main' | sudo tee /etc/apt/sources.list.d/unityhub.list >/dev/null
           sudo apt-get update -y
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y unityhub
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y unityhub xvfb
           hub="$(command -v unityhub)"
           test -x "$hub" || { echo 'Unity Hub package installed but executable was not found.' >&2; exit 1; }
+          echo "UNITY_HUB_PATH=$hub" >> "$GITHUB_ENV"
           echo "Unity Hub installed at: $hub"
 
-          # buildalon/unity-setup@v2 currently checks /opt/unityhub/unityhub on Linux even though
-          # Unity's current Debian package installs the executable at /usr/bin/unityhub. Provide
-          # the compatibility path explicitly so the action can proceed to editor/module setup.
-          sudo mkdir -p /opt/unityhub
-          sudo ln -sf "$hub" /opt/unityhub/unityhub
-          test -x /opt/unityhub/unityhub
-          /opt/unityhub/unityhub -- --headless help >/tmp/unityhub-help.txt 2>&1 || true
-          head -40 /tmp/unityhub-help.txt || true
+          # Unity's current Linux Hub CLI syntax is `unityhub --headless ...` (one dash group,
+          # unlike Windows/macOS). Hub is an Electron app, so run its headless CLI under Xvfb on CI.
+          xvfb-run -a "$hub" --headless help --errors | head -80
 
-      - name: Setup Unity 6.0.76f1 with Android Build Support
-        id: unity-setup
-        uses: buildalon/unity-setup@v2
-        with:
-          version-file: ProjectSettings/ProjectVersion.txt
-          unity-version: 6000.0.76f1 (6f7f9e1c9e8a)
-          build-targets: Android
-          cache-installation: true
-          auto-update-hub: false
+      - name: Install Unity 6.0.76f1 and Android modules with Hub CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_root="$HOME/Unity/Hub/Editor"
+          mkdir -p "$install_root"
+
+          xvfb-run -a "$UNITY_HUB_PATH" --headless install-path -s "$install_root" --errors
+          xvfb-run -a "$UNITY_HUB_PATH" --headless install \
+            --version 6000.0.76f1 \
+            --changeset 6f7f9e1c9e8a \
+            --module android android-sdk-ndk-tools android-open-jdk \
+            --errors
+
+          # Hub can take a moment to flush its installation database after the child installers exit.
+          xvfb-run -a "$UNITY_HUB_PATH" --headless editors -i --errors || true
+
+          editor="$install_root/6000.0.76f1/Editor/Unity"
+          if [ ! -x "$editor" ]; then
+            editor="$(find "$HOME/Unity" -type f -path '*/6000.0.76f1/Editor/Unity' -perm -111 -print -quit 2>/dev/null || true)"
+          fi
+          test -x "$editor" || {
+            echo 'Unity 6000.0.76f1 did not produce an Editor executable.' >&2
+            find "$HOME/Unity" -maxdepth 8 -type f -name Unity -perm -111 -print 2>/dev/null || true
+            exit 1
+          }
+          echo "UNITY_EDITOR_PATH=$editor" >> "$GITHUB_ENV"
+          echo "Resolved Unity Editor: $editor"
 
       - name: Verify Unity Android installation
         shell: bash
         run: |
           set -euo pipefail
-          echo "UNITY_EDITOR_PATH=$UNITY_EDITOR_PATH"
           test -x "$UNITY_EDITOR_PATH" || { echo 'Unity editor executable is missing.' >&2; exit 1; }
           android_player="$(dirname "$UNITY_EDITOR_PATH")/Data/PlaybackEngines/AndroidPlayer"
           test -d "$android_player" || { echo "Android Build Support missing: $android_player" >&2; exit 1; }
@@ -98,6 +112,7 @@ jobs:
           test -x "$android_player/OpenJDK/bin/java" || { echo 'Unity OpenJDK missing/incomplete.' >&2; exit 1; }
           grep -E 'Pkg.Revision|Pkg.Desc' "$android_player/NDK/source.properties" || cat "$android_player/NDK/source.properties"
           "$android_player/OpenJDK/bin/java" -version
+          echo 'Unity Android toolchain validation passed.'
           df -h /
 
       - name: Activate Unity Personal on the cloud runner
