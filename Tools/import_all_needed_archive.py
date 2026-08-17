@@ -4,6 +4,8 @@
 The script is deterministic and release-safe:
 - real user FBX/GLB/video/audio are copied, never replaced with placeholders;
 - the exact document GLB is additionally converted to a Unity-native OBJ with no simplification;
+- the original Boiled One H.264 MP4 is preserved byte-for-byte in StreamingAssets because
+  the Linux Unity 6 Editor can only import VP8 video clips;
 - `amazing-grace-analog-horror.mp3` is explicitly rejected;
 - nested archive names may be Unicode or GitHub-style #UXXXX escaped names;
 - grass stays as one source FBX; Unity splits its three variants by measured XZ footprint.
@@ -26,6 +28,7 @@ import zipfile
 from glb_to_obj import convert_glb_to_obj
 
 ROOT = Path("Assets/FallenForest")
+STREAMING_VIDEO = Path("Assets/StreamingAssets/FallenForest/Video/boiled_one_jumpscare.mp4")
 FORBIDDEN = "amazing-grace-analog-horror.mp3"
 
 
@@ -190,10 +193,12 @@ def import_archive(outer_zip: Path) -> list[Path]:
 
         video_src = Path(td) / "boiled_video"
         mp4 = require_one(video_src, "*.mp4")
-        video_dst = ROOT / "Video/boiled_one_jumpscare.mp4"
-        video_dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(mp4, video_dst)
-        changed.append(video_dst)
+        legacy_video = ROOT / "Video/boiled_one_jumpscare.mp4"
+        if legacy_video.exists():
+            legacy_video.unlink()
+        STREAMING_VIDEO.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(mp4, STREAMING_VIDEO)
+        changed.append(STREAMING_VIDEO)
 
     return changed
 
