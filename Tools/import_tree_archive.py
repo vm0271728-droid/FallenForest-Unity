@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Import the user's canonical `Деревья.zip` into Fallen Forest source paths.
+"""Import every usable model from the user's canonical `Деревья.zip`.
 
-The importer keeps every supplied pack, but only converts archive formats that Python can safely
-unpack itself. Black Spruce is fully expanded including LOD0-LOD4 FBX + textures. Dead firs are
-expanded from the nested ZIP. The low-poly RAR is preserved byte-for-byte together with textures;
-its Blender source can be converted in a later authored asset pass without silently replacing it.
+Release rules:
+- Black Spruce: fully expand LOD0-LOD4 FBX + textures.
+- Dead firs: expand the nested OBJ/MTL pack + textures.
+- Low-poly forest pack: preserve the original RAR, then extract its FBX/OBJ/MTL and textures with
+  7-Zip. CI installs p7zip/7zip explicitly; failure to unpack this user model is a hard release error.
+- Never substitute placeholder geometry for a failed source import.
 """
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -59,6 +62,25 @@ def extract_nested_zip(path: Path, destination: Path) -> None:
         safe_extract(zf, destination)
 
 
+def extract_rar_with_7zip(rar_path: Path, destination: Path) -> None:
+    seven_zip = shutil.which("7z") or shutil.which("7zz") or shutil.which("7za")
+    if seven_zip is None:
+        raise RuntimeError(
+            "7-Zip is required to unpack LOW POLY FOREST TREE PACK.rar. "
+            "The release workflow must install p7zip-full/7zip; source substitution is forbidden."
+        )
+    destination.mkdir(parents=True, exist_ok=True)
+    process = subprocess.run(
+        [seven_zip, "x", "-y", f"-o{destination}", str(rar_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    if process.returncode != 0:
+        raise RuntimeError(f"7-Zip failed to extract {rar_path.name}:\n{process.stdout}")
+
+
 def import_archive(archive: Path) -> None:
     if not archive.is_file():
         raise FileNotFoundError(archive)
@@ -80,6 +102,7 @@ def import_archive(archive: Path) -> None:
         if black_pack is None or low_pack is None or dead_pack is None:
             raise RuntimeError("Could not classify all three canonical tree packs.")
 
+        # 1) Black Spruce, exact supplied LOD chain.
         black_outer = temp / "black_outer"
         extract_nested_zip(black_pack, black_outer)
         black_source_zip = exactly_one(black_outer / "source", "*.zip")
@@ -94,6 +117,7 @@ def import_archive(archive: Path) -> None:
             if not any(marker.lower() in p.name.lower() for p in lod_fbx):
                 raise RuntimeError(f"Black Spruce source is missing {marker} FBX.")
 
+        # 2) Dead fir OBJ pack.
         dead_outer = temp / "dead_outer"
         extract_nested_zip(dead_pack, dead_outer)
         dead_source_zip = exactly_one(dead_outer / "source", "*.zip")
@@ -103,19 +127,36 @@ def import_archive(archive: Path) -> None:
             copy_tree(dead_outer / "textures", dead_dst / "ExtraTextures")
         exactly_one(dead_dst / "Source", "firs.obj")
 
+        # 3) Low-poly forest. The public ZIP wraps its Unity-ready FBX/OBJ in RAR.
         low_outer = temp / "low_outer"
         extract_nested_zip(low_pack, low_outer)
         low_dst = ROOT / "LowPolyForest"
-        if (low_outer / "source").exists():
-            copy_tree(low_outer / "source", low_dst / "Source")
-        if (low_outer / "textures").exists():
-            copy_tree(low_outer / "textures", low_dst / "Textures")
-        exactly_one(low_dst / "Source", "*.rar")
+        source_rar = exactly_one(low_outer / "source", "*.rar")
+        low_dst_source = low_dst / "Source"
+        low_dst_source.mkdir(parents=True, exist_ok=True)
+        preserved_rar = low_dst_source / source_rar.name
+        shutil.copy2(source_rar, preserved_rar)
 
-    print("Canonical tree archive imported:")
-    print(f" - {ROOT / 'BlackSpruce'} (LOD0-LOD4 ready for Unity)")
-    print(f" - {ROOT / 'DeadFirs'} (OBJ source ready for Unity)")
-    print(f" - {ROOT / 'LowPolyForest'} (RAR/Blend source preserved + textures)")
+        unpacked = temp / "low_rar"
+        extract_rar_with_7zip(source_rar, unpacked)
+        forest_root = unpacked / "FOREST_TREE_PACK"
+        if not forest_root.exists():
+            raise RuntimeError("Low-poly RAR did not contain FOREST_TREE_PACK root.")
+        copy_tree(forest_root / "SOURCE", low_dst_source / "Extracted")
+        copy_tree(forest_root / "TEXTURES", low_dst / "Textures")
+        # The outer ZIP duplicates most textures; preserve those too, but never overwrite exact
+        # nested paths in a way that loses the author's folder organization.
+        if (low_outer / "textures").exists():
+            copy_tree(low_outer / "textures", low_dst / "OuterTextures")
+
+        exactly_one(low_dst_source / "Extracted", "Tree_Pack.fbx")
+        exactly_one(low_dst_source / "Extracted", "Tree_Pack.obj")
+        exactly_one(low_dst_source / "Extracted", "Tree_Pack.mtl")
+
+    print("Canonical tree archive imported completely:")
+    print(f" - {ROOT / 'BlackSpruce'} (LOD0-LOD4)")
+    print(f" - {ROOT / 'DeadFirs'} (OBJ/MTL)")
+    print(f" - {ROOT / 'LowPolyForest'} (RAR preserved + FBX/OBJ/MTL extracted)")
 
 
 def main() -> int:
