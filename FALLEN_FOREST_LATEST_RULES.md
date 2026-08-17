@@ -2,7 +2,7 @@
 
 This file records design decisions added after `FALLEN_FOREST_MASTER_PLAN.md` was created. A future continuation must read both files until these points are folded back into the master plan.
 
-Last synchronized: 2026-08-17 06:18 Europe/Moscow (+03:00).
+Last synchronized: 2026-08-17 06:25 Europe/Moscow (+03:00).
 
 ## Document placement and presentation — fixed
 
@@ -22,3 +22,28 @@ Last synchronized: 2026-08-17 06:18 Europe/Moscow (+03:00).
 - Keep the effect mobile-friendly: tiny emissive particles/billboards with either no real Light components or extremely restrained lighting.
 
 This clarification overrides any earlier wording that could be read as “the document itself has a 45% chance to appear.”
+
+## Implementation staged after this clarification
+
+Branch `feature/document-fireflies-grass-clearance` currently stages the code implementation of the rules above:
+
+- `DocumentSpawner.cs` keeps generated documents off registered `TrailZone` volumes and still selects all 10 required slots.
+- Each uncollected document gets a shader-driven `GrassExclusionEmitter`, so grass clears in a soft circular falloff even when the grass is mesh-batched.
+- Each spawned document independently rolls the fixed **45% firefly chance**; a successful roll creates **4–6** very small dim fireflies with a deliberately tiny local glow and distance culling.
+- `TrailZone.cs` exposes a smooth vegetation-density gradient: effectively no grass on the path volume, sparse grass beside it, then dense grass farther into the forest.
+- `ForestScatterer.cs` staging raises the default grass target from 9000 to 16000 clumps and applies the trail density gradient while keeping mesh batching for Android.
+- `ForestWindURP.shader` staging supports soft stochastic grass suppression around documents instead of a hard square hole.
+
+These changes are staged on a feature branch and are **not yet claimed compiled** until the Unity Android CI reaches a real project compile.
+
+## Uneven terrain implementation staged
+
+Branch `feature/world-terrain-relief` contains `TerrainReliefGenerator.cs`:
+
+- deterministic layered broad/medium/fine terrain noise;
+- natural depressions and shallow ridge structure;
+- moderate vertical relief rather than a flat plane;
+- a blended flatter opening area around the wake-up/start point so the beginning remains playable;
+- intended generation/baking before release, not expensive per-frame terrain deformation.
+
+This terrain branch is also staged and must be integrated into the real generated/committed Forest scene before being considered final.
