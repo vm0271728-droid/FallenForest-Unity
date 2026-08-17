@@ -78,10 +78,15 @@ jobs:
           mkdir -p "$install_root"
 
           xvfb-run -a "$UNITY_HUB_PATH" --headless install-path -s "$install_root" --errors
+
+          # IMPORTANT: install Android as the parent module and explicitly include its child modules.
+          # Without --childModules Unity Hub prompts interactively for SDK/NDK/OpenJDK and a CI runner
+          # blocks forever waiting for input. `-m android --childModules` is the documented headless form.
           xvfb-run -a "$UNITY_HUB_PATH" --headless install \
             --version 6000.0.76f1 \
             --changeset 6f7f9e1c9e8a \
-            --module android android-sdk-ndk-tools android-open-jdk \
+            --module android \
+            --childModules \
             --errors
 
           # Hub can take a moment to flush its installation database after the child installers exit.
