@@ -61,13 +61,31 @@ jobs:
           echo 'deb [signed-by=/usr/share/keyrings/Unity_Technologies_ApS.gpg] https://hub-dist.unity3d.com/artifactory/hub-debian-prod-local stable main' | sudo tee /etc/apt/sources.list.d/unityhub.list >/dev/null
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y unityhub xvfb
-          hub="$(command -v unityhub)"
+
+          # Hub 3.20+ installs the real executable and Unity.Licensing.Client under /usr/lib/unityhub.
+          # /usr/bin/unityhub is only the launcher entry and causes buildalon licensing to search /usr/bin/**.
+          if [ -x /usr/lib/unityhub/unityhub ]; then
+            hub=/usr/lib/unityhub/unityhub
+          elif [ -x /opt/unityhub/unityhub ]; then
+            hub=/opt/unityhub/unityhub
+          else
+            hub="$(command -v unityhub)"
+          fi
           test -x "$hub" || { echo 'Unity Hub package installed but executable was not found.' >&2; exit 1; }
+
+          licensing_client="$(find "$(dirname "$hub")" -maxdepth 5 -type f -name Unity.Licensing.Client -perm -111 -print -quit 2>/dev/null || true)"
+          test -n "$licensing_client" || {
+            echo "Unity.Licensing.Client was not found under the real Hub directory: $(dirname "$hub")" >&2
+            find "$(dirname "$hub")" -maxdepth 5 -type f -iname '*Licensing*' -print 2>/dev/null | head -80 || true
+            exit 1
+          }
+
           echo "UNITY_HUB_PATH=$hub" >> "$GITHUB_ENV"
           echo "Unity Hub installed at: $hub"
+          echo "Unity Licensing Client: $licensing_client"
 
-          # Unity's current Linux Hub CLI syntax is `unityhub --headless ...` (one dash group,
-          # unlike Windows/macOS). Hub is an Electron app, so run its headless CLI under Xvfb on CI.
+          # Unity's current Linux Hub CLI syntax is `unityhub --headless ...`.
+          # Hub is Electron-based, so run its headless CLI under Xvfb on CI.
           xvfb-run -a "$hub" --headless help --errors | head -80
 
       - name: Install Unity 6.0.76f1 and Android modules with Hub CLI
@@ -79,9 +97,7 @@ jobs:
 
           xvfb-run -a "$UNITY_HUB_PATH" --headless install-path -s "$install_root" --errors
 
-          # IMPORTANT: install Android as the parent module and explicitly include its child modules.
-          # Without --childModules Unity Hub prompts interactively for SDK/NDK/OpenJDK and a CI runner
-          # blocks forever waiting for input. `-m android --childModules` is the documented headless form.
+          # Install Android as the parent module and include all child modules non-interactively.
           xvfb-run -a "$UNITY_HUB_PATH" --headless install \
             --version 6000.0.76f1 \
             --changeset 6f7f9e1c9e8a \
@@ -89,7 +105,6 @@ jobs:
             --childModules \
             --errors
 
-          # Hub can take a moment to flush its installation database after the child installers exit.
           xvfb-run -a "$UNITY_HUB_PATH" --headless editors -i --errors || true
 
           editor="$install_root/6000.0.76f1/Editor/Unity"
