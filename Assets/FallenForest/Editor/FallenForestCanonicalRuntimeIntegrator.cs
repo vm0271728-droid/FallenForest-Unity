@@ -42,8 +42,10 @@ namespace FallenForest.EditorTools
                 UniversalAdditionalCameraData cameraData = camera.GetUniversalAdditionalCameraData();
                 cameraData.renderPostProcessing = true;
 
+                GameObject flashlightVisual = FindGameObject("FlashlightVisual_Final");
                 SerializedObject flashSo = new(flashlight);
                 SetObject(flashSo, "rayOrigin", flashlight.transform);
+                SetObject(flashSo, "visualRoot", flashlightVisual);
                 flashSo.ApplyModifiedPropertiesWithoutUndo();
 
                 if (look != null)
