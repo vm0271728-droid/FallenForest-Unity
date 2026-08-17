@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Import the user's canonical `все нужное.zip` into Fallen Forest source paths.
 
-The script is intentionally deterministic and release-safe:
+The script is deterministic and release-safe:
 - real user FBX/GLB/video/audio are copied, never replaced with placeholders;
+- the exact document GLB is additionally converted to a Unity-native OBJ with no simplification;
 - `amazing-grace-analog-horror.mp3` is explicitly rejected;
 - nested archive names may be Unicode or GitHub-style #UXXXX escaped names;
-- grass is preserved as one source FBX; Unity editor code splits its three mesh variants
-  by actual footprint (large / small / tiny) after import.
+- grass stays as one source FBX; Unity splits its three variants by measured XZ footprint.
 
 Usage:
     python3 Tools/import_all_needed_archive.py /path/to/все\\ нужное.zip
@@ -22,6 +22,8 @@ import shutil
 import sys
 import tempfile
 import zipfile
+
+from glb_to_obj import convert_glb_to_obj
 
 ROOT = Path("Assets/FallenForest")
 FORBIDDEN = "amazing-grace-analog-horror.mp3"
@@ -154,7 +156,10 @@ def import_archive(outer_zip: Path) -> list[Path]:
         docs_dst = ROOT / "Art/Documents/UserDocument"
         copy_tree(docs_src / "source", docs_dst / "Source")
         copy_tree(docs_src / "textures", docs_dst / "Textures")
-        changed.append(docs_dst)
+        document_glb = require_one(docs_dst / "Source", "*.glb")
+        document_obj = docs_dst / "Source/document_file_folder.obj"
+        convert_glb_to_obj(document_glb, document_obj, docs_dst / "Textures")
+        changed.extend([docs_dst, document_obj, document_obj.with_suffix(".mtl")])
 
         pickup_src = Path(td) / "pickup"
         pickup_dst = ROOT / "Art/Vehicles/Pickup"
@@ -211,7 +216,7 @@ def main() -> int:
     print("Canonical Fallen Forest source assets imported:")
     for path in changed:
         print(f" - {path}")
-    print("Next: open Unity and run Fallen Forest/Release/Integrate User Content.")
+    print("Next: Unity release integration builds real prefabs/scenes from these sources.")
     return 0
 
 
