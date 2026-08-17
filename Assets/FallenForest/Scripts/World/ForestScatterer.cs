@@ -6,6 +6,7 @@ namespace FallenForest.World
     /// <summary>
     /// Deterministic dense forest scatterer. Broad Perlin clusters create believable dense stands,
     /// narrow sight-lines and occasional open clearings instead of a uniform random carpet.
+    /// Generated trail zones keep path centres free of trees and smoothly thin the grass at shoulders.
     /// </summary>
     public sealed class ForestScatterer : MonoBehaviour
     {
@@ -25,6 +26,9 @@ namespace FallenForest.World
         [SerializeField, Range(0f, .9f)] private float minimumClusterNoise = .20f;
         [SerializeField, Min(.25f)] private float minimumTreeSpacing = 1.75f;
         [SerializeField, Min(1)] private int placementAttemptsPerTree = 9;
+
+        [Header("Trails")]
+        [SerializeField, Min(0f)] private float treeTrailClearance = 1.15f;
 
         [Header("Grass rendering")]
         [SerializeField] private bool batchGrassMeshes = true;
@@ -91,6 +95,8 @@ namespace FallenForest.World
 
                 if (startPoint != null && Vector2.Distance(flat, new Vector2(startPoint.position.x, startPoint.position.z)) < clearStartRadius)
                     continue;
+                if (TrailZone.IsNearAnyTrail(p, treeTrailClearance))
+                    continue;
 
                 float n = Mathf.PerlinNoise(noiseOffset.x + p.x * clusterFrequency, noiseOffset.y + p.z * clusterFrequency);
                 float acceptance = Mathf.InverseLerp(minimumClusterNoise, 1f, n);
@@ -139,9 +145,9 @@ namespace FallenForest.World
             MaterialPropertyBlock grassProperties = new();
             grassProperties.SetFloat(GrassExclusionEnabled, 1f);
 
-            // We sample a little more than the requested count because trail rejection deliberately
-            // removes vegetation from path centers and thins it along their shoulders.
-            int attempts = Mathf.CeilToInt(grassClumpCount * 1.35f);
+            // Sample above the requested count because trail rejection deliberately removes vegetation
+            // from the dirt centre and makes it progressively denser toward the forest edge.
+            int attempts = Mathf.CeilToInt(grassClumpCount * 1.5f);
             for (int i = 0; i < attempts && acceptedGrass < grassClumpCount; i++)
             {
                 Vector3 p = RandomPoint(terrainOrigin, terrainSize);
