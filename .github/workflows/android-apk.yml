@@ -78,22 +78,6 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          success=0
-          for attempt in 1 2; do
-            echo "Android module installation attempt $attempt"
-            if unity install-modules \
-              -e 6000.0.76f1 \
-              -m android \
-              --cm \
-              --accept-eula \
-              --format ndjson; then
-              success=1
-              break
-            fi
-            df -h /
-            sleep 8
-          done
-          test "$success" -eq 1 || { echo 'Unity Android module installation failed after retry.' >&2; exit 1; }
 
           editor="$(find "$HOME" -type f -path '*/6000.0.76f1/Editor/Unity' -perm -111 -print -quit 2>/dev/null || true)"
           if [ -z "$editor" ]; then
@@ -107,11 +91,36 @@ jobs:
           echo "UNITY_EDITOR_PATH=$editor" >> "$GITHUB_ENV"
           echo "Resolved Unity Editor: $editor"
 
+          # Unity CLI beta.5 currently fails while extracting r27c if the NDK parent directory
+          # does not already exist on a fresh Linux editor install. Create only the parent;
+          # the module installer still has to populate and validate the actual toolchain.
           android_player="$(dirname "$editor")/Data/PlaybackEngines/AndroidPlayer"
+          mkdir -p "$android_player/NDK"
+
+          success=0
+          for attempt in 1 2; do
+            echo "Android module installation attempt $attempt"
+            if unity install-modules \
+              -e 6000.0.76f1 \
+              -m android \
+              --cm \
+              --accept-eula \
+              --format ndjson; then
+              success=1
+              break
+            fi
+            echo 'Android module install failed; preserving installed child modules and retrying.'
+            mkdir -p "$android_player/NDK"
+            df -h /
+            sleep 8
+          done
+          test "$success" -eq 1 || { echo 'Unity Android module installation failed after retry.' >&2; exit 1; }
+
           test -d "$android_player" || { echo "Android Build Support missing: $android_player" >&2; exit 1; }
-          test -d "$android_player/SDK" || { echo 'Unity Android SDK child module is missing.' >&2; exit 1; }
-          test -d "$android_player/NDK" || { echo 'Unity Android NDK child module is missing.' >&2; exit 1; }
-          test -d "$android_player/OpenJDK" || { echo 'Unity OpenJDK child module is missing.' >&2; exit 1; }
+          test -f "$android_player/NDK/source.properties" || { echo 'Unity Android NDK child module is missing or incomplete.' >&2; find "$android_player/NDK" -maxdepth 2 -type f | head -30 || true; exit 1; }
+          test -d "$android_player/SDK/platform-tools" || { echo 'Unity Android SDK child module is missing or incomplete.' >&2; exit 1; }
+          test -x "$android_player/OpenJDK/bin/java" || { echo 'Unity OpenJDK child module is missing or incomplete.' >&2; exit 1; }
+          "$android_player/OpenJDK/bin/java" -version
           df -h /
 
       - name: Activate Unity Personal on the cloud runner
