@@ -8,6 +8,7 @@ on:
       - 'Assets/**'
       - 'Packages/**'
       - 'ProjectSettings/**'
+      - 'Tools/**'
       - '.github/workflows/android-apk.yml'
 
 concurrency:
@@ -26,6 +27,9 @@ jobs:
           fetch-depth: 0
           lfs: true
 
+      - name: Fetch vetted CC0 menu and forest ambience
+        run: python3 Tools/fetch_cc0_audio.py
+
       - name: Verify required Unity credentials exist
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
@@ -40,6 +44,9 @@ jobs:
       - name: Verify release media and exact creature models are present
         run: |
           set -euo pipefail
+          test -f Assets/FallenForest/Audio/Menu/creepy_forest_menu.ogg
+          test -f Assets/FallenForest/Audio/Ambience/forest_ambience_cc0.mp3
+          test -f Assets/FallenForest/Audio/Ambience/ambient_horror_cc0.ogg
           test -f Assets/FallenForest/Audio/Screamers/jakes-screamer.mp3
           test -f Assets/FallenForest/Audio/Screamers/the-screamer-shared-between-mallie-and-jenny.mp3
           test ! -f Assets/FallenForest/Audio/Screamers/amazing-grace-analog-horror.mp3
