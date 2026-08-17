@@ -35,6 +35,7 @@ namespace FallenForest.EditorTools
 
             FallenForestSceneAssembler.EnsureRequiredScenesForCI();
             FallenForestUserContentIntegrator.PatchGeneratedForestScene();
+            FallenForestStreamingVideoIntegrator.ConfigureBoiledSequence();
             FallenForestFinaleIntegrator.FinalizeForestEnding();
             FallenForestRuntimeSceneIntegrator.FinalizeForestRuntimeSystems();
             FallenForestMenuFinalizer.FinalizeMainMenu();
