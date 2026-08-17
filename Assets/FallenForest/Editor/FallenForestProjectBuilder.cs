@@ -27,7 +27,12 @@ namespace FallenForest.EditorTools
             FallenForestRenderPipelineSetup.EnsureConfigured();
 
             FallenForestUserContentIntegrator.IntegrateBeforeSceneAssembly();
+
+            // The exact prefabs are built above. Apply their real PBR textures before any scene
+            // instances are created; previously this pass existed but was never called in CI.
+            FallenForestUserMaterialBuilder.ApplyIfAvailable();
             FallenForestGrassMaterialBuilder.ApplyIfAvailable();
+            FallenForestCreatureMotionIntegrator.Apply();
 
             PickupWheelMeshSplitter.BuildIfAvailable();
             AssetDatabase.SaveAssets();
@@ -35,12 +40,18 @@ namespace FallenForest.EditorTools
 
             FallenForestSceneAssembler.EnsureRequiredScenesForCI();
             FallenForestUserContentIntegrator.PatchGeneratedForestScene();
+            FallenForestTerrainVisualIntegrator.Configure();
+            FallenForestViewmodelMotionIntegrator.Configure();
             FallenForestStreamingVideoIntegrator.ConfigureBoiledSequence();
             FallenForestFinaleIntegrator.FinalizeForestEnding();
             FallenForestRuntimeSceneIntegrator.FinalizeForestRuntimeSystems();
             FallenForestMenuFinalizer.FinalizeMainMenu();
             FallenForestRuntimeSceneIntegrator.FinalizeMainMenuRuntimeSystems();
+            AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+
+            // Do not allow another technically green but visually/runtime-incomplete APK.
+            FallenForestRuntimeReadinessValidator.ValidateOrThrow();
             FallenForestReleaseValidator.ValidateReleaseOrThrow();
 
             if (!File.Exists(MainMenu) || !File.Exists(Forest))
