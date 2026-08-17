@@ -1,5 +1,5 @@
+using FallenForest.UI;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 namespace FallenForest.Core
 {
@@ -11,11 +11,11 @@ namespace FallenForest.Core
         public static void PlayNewGame()
         {
             SaveSystem.BeginNewRun();
-            SceneManager.LoadScene(ForestScene);
+            LoadingScreenController.LoadScene(ForestScene);
         }
 
-        public static void ContinueGame() => SceneManager.LoadScene(ForestScene);
-        public static void MainMenu() => SceneManager.LoadScene(MainMenuScene);
+        public static void ContinueGame() => LoadingScreenController.LoadScene(ForestScene);
+        public static void MainMenu() => LoadingScreenController.LoadScene(MainMenuScene);
 
         public static void Quit()
         {
