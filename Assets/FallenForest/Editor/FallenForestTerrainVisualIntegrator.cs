@@ -38,7 +38,7 @@ namespace FallenForest.EditorTools
 
                 TerrainCollider collider = terrain.GetComponent<TerrainCollider>();
                 if (collider == null) collider = terrain.gameObject.AddComponent<TerrainCollider>();
-                collider.sharedTerrainData = terrain.terrainData;
+                collider.terrainData = terrain.terrainData;
                 collider.enabled = true;
 
                 terrain.terrainData.terrainLayers = new[] { groundLayer };

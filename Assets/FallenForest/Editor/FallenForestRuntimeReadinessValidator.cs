@@ -57,7 +57,7 @@ namespace FallenForest.EditorTools
                         TerrainCollider collider = terrain.GetComponent<TerrainCollider>();
                         if (collider == null || !collider.enabled)
                             errors.Add("Forest Terrain has no enabled TerrainCollider.");
-                        else if (collider.sharedTerrainData != terrain.terrainData)
+                        else if (collider.terrainData != terrain.terrainData)
                             errors.Add("Forest TerrainCollider is not bound to the active TerrainData.");
 
                         if (terrain.terrainData.terrainLayers == null || terrain.terrainData.terrainLayers.Length == 0)
