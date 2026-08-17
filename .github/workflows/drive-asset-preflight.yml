@@ -5,40 +5,44 @@ on:
     branches: [ integration/release-mainline ]
     paths:
       - '.github/workflows/drive-asset-preflight.yml'
+      - 'Tools/import_all_needed_archive.py'
+      - 'Tools/import_tree_archive.py'
   workflow_dispatch:
 
 jobs:
   preflight:
-    name: Download and validate canonical release archive
+    name: Download and validate canonical release archives
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout release integration branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
           lfs: false
 
-      - name: Download canonical archive from Google Drive
+      - name: Download canonical archives from Google Drive
         shell: bash
         run: |
           set -euo pipefail
           python3 -m pip install --disable-pip-version-check --quiet 'gdown>=5.2,<6'
+
           python3 -m gdown 'https://drive.google.com/uc?id=1W9RzSrC8SWn1BJCa_i0OU2Wkk0L0LQe6' -O all-needed.zip
           test -f all-needed.zip
-          actual="$(stat -c %s all-needed.zip)"
-          echo "Downloaded bytes: $actual"
-          test "$actual" = '85825470' || {
-            echo "Unexpected archive size: $actual (expected 85825470)" >&2
-            exit 2
-          }
-          sha256sum all-needed.zip
+          test "$(stat -c %s all-needed.zip)" = '85825470'
+          echo '0848ea17b01f750747a37e3af9b0e74723efcba58a253c20e798e30b41a5e9d8  all-needed.zip' | sha256sum -c -
+
+          python3 -m gdown 'https://drive.google.com/uc?id=11nhh2Q0djgdQm653EQkWJjqSpdJ9SEFk' -O trees.zip
+          test -f trees.zip
+          test "$(stat -c %s trees.zip)" = '198111913'
+          echo '13cc391a560ebddae59d3940a5f17a02083fd1f1f487fdeaba8dea5401df3363  trees.zip' | sha256sum -c -
 
       - name: Import exact user release assets
         shell: bash
         run: |
           set -euo pipefail
           python3 Tools/import_all_needed_archive.py all-needed.zip
+          python3 Tools/import_tree_archive.py trees.zip
 
       - name: Verify imported source payload
         shell: bash
@@ -54,6 +58,13 @@ jobs:
           require_file Assets/FallenForest/Art/Models/DoctorNowhere/Boiled/Source/BoiledOne.fbx
           require_file Assets/FallenForest/Audio/Screamers/jakes-screamer.mp3
           require_file Assets/FallenForest/Audio/Screamers/the-screamer-shared-between-mallie-and-jenny.mp3
-          require_file Assets/FallenForest/Video/boiled_one_jumpscare.mp4
+          require_file Assets/StreamingAssets/FallenForest/Video/boiled_one_jumpscare.mp4
+          require_file 'Assets/FallenForest/Art/Vegetation/UserTrees/BlackSpruce/Source/Picea mariana HD_Arctic mat 100_LOD0.fbx'
+          require_file 'Assets/FallenForest/Art/Vegetation/UserTrees/BlackSpruce/Source/zzz_LODs/LOD1/Picea mariana HD_Arctic mat 100_LOD1.fbx'
+          require_file 'Assets/FallenForest/Art/Vegetation/UserTrees/BlackSpruce/Source/zzz_LODs/LOD2/Picea mariana HD_Arctic mat 100_LOD2.fbx'
+          require_file 'Assets/FallenForest/Art/Vegetation/UserTrees/BlackSpruce/Source/zzz_LODs/LOD3/Picea mariana HD_Arctic mat 100_LOD3.fbx'
+          require_file 'Assets/FallenForest/Art/Vegetation/UserTrees/BlackSpruce/Source/zzz_LODs/LOD4/Picea mariana HD_Arctic mat 100_LOD4.fbx'
+          require_file Assets/FallenForest/Art/Vegetation/UserTrees/DeadFirs/Source/firs.obj
+          require_file 'Assets/FallenForest/Art/Vegetation/UserTrees/LowPolyForest/Source/LOW POLY FOREST TREE PACK.rar'
           test ! -f Assets/FallenForest/Audio/Screamers/amazing-grace-analog-horror.mp3
-          echo 'Canonical Drive payload imported and validated successfully.'
+          echo 'Canonical Drive payloads imported and validated successfully.'
