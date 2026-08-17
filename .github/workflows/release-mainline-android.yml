@@ -4,6 +4,10 @@ on:
   push:
     branches: [ integration/release-mainline ]
     paths:
+      - 'Assets/**'
+      - 'Packages/**'
+      - 'ProjectSettings/**'
+      - 'Tools/**'
       - '.github/workflows/release-mainline-android.yml'
   workflow_dispatch:
 
