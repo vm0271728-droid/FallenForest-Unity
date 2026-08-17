@@ -4,7 +4,7 @@ name: Build Fallen Forest APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, integration/release-mainline ]
     paths:
       - 'Assets/**'
       - 'Packages/**'
@@ -184,14 +184,42 @@ jobs:
       - name: Compile/import Unity project
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           test -x "$UNITY_EDITOR_PATH"
+          log="$RUNNER_TEMP/unity-compile-import.log"
+
+          set +e
           "$UNITY_EDITOR_PATH" \
             -batchmode \
             -nographics \
             -quit \
             -projectPath "$GITHUB_WORKSPACE" \
-            -logFile -
+            -logFile "$log"
+          rc=$?
+          set -e
+
+          cat "$log" || true
+
+          if grep -Eq 'error CS[0-9]{4}' "$log"; then
+            echo 'C# compiler error detected in Unity compile/import log.' >&2
+            exit 1
+          fi
+
+          if [ "$rc" -eq 0 ]; then
+            echo 'Unity compile/import completed cleanly.'
+            exit 0
+          fi
+
+          if [ "$rc" -eq 134 ] \
+            && grep -Fq 'Batchmode quit successfully invoked - shutting down!' "$log" \
+            && grep -Fq 'Cannot create web request without initializing the system' "$log" \
+            && grep -Fq 'UnityEngine::Analytics::DataDispatcher' "$log"; then
+            echo '::warning::Unity 6 Linux Editor hit the verified Analytics shutdown race after successful batchmode quit; compile/import is accepted.'
+            exit 0
+          fi
+
+          echo "Unity compile/import failed with exit code $rc." >&2
+          exit "$rc"
 
       - name: Cache Unity Library
         uses: actions/cache@v4
@@ -201,17 +229,59 @@ jobs:
           restore-keys: |
             Library-Android-
 
-      - name: Build development-signed APK
+      - name: Build and verify development-signed APK
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          apk='Builds/Android/Fallen_Forest_1.0.0.apk'
+          log="$RUNNER_TEMP/unity-release-build.log"
+          rm -f "$apk"
+
+          set +e
           "$UNITY_EDITOR_PATH" \
             -batchmode \
             -nographics \
             -quit \
             -projectPath "$GITHUB_WORKSPACE" \
             -executeMethod FallenForest.EditorTools.FallenForestProjectBuilder.CIBuildAndroid \
-            -logFile -
+            -logFile "$log"
+          rc=$?
+          set -e
+
+          cat "$log" || true
+
+          if [ ! -s "$apk" ]; then
+            echo "APK is missing or empty after Unity build: $apk" >&2
+            [ "$rc" -ne 0 ] && exit "$rc"
+            exit 1
+          fi
+
+          if ! grep -Fq 'Fallen Forest APK built:' "$log"; then
+            echo 'Unity did not emit the successful Fallen Forest build marker.' >&2
+            exit 1
+          fi
+
+          unzip -tqq "$apk" || {
+            echo 'APK ZIP structure validation failed.' >&2
+            exit 1
+          }
+          echo "APK structure validated: $(du -h "$apk" | cut -f1)"
+
+          if [ "$rc" -eq 0 ]; then
+            echo 'Unity Android build completed cleanly.'
+            exit 0
+          fi
+
+          if [ "$rc" -eq 134 ] \
+            && grep -Fq 'Batchmode quit successfully invoked - shutting down!' "$log" \
+            && grep -Fq 'Cannot create web request without initializing the system' "$log" \
+            && grep -Fq 'UnityEngine::Analytics::DataDispatcher' "$log"; then
+            echo '::warning::Unity 6 Linux Editor hit the verified Analytics shutdown race after a validated successful APK build; accepting the artifact.'
+            exit 0
+          fi
+
+          echo "Unity returned exit code $rc after producing the APK, but it was not the verified shutdown race." >&2
+          exit "$rc"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
