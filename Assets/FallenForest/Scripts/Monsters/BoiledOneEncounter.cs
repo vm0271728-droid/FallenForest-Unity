@@ -32,6 +32,11 @@ namespace FallenForest.Monsters
             player = p;
             director = owner;
             spawnPoint = point;
+
+            // Fixed design rule: the first Boiled spawn consumes the special encounter for this run,
+            // even if the player never finds it before its untriggered lifetime expires.
+            GameProgress.Instance?.MarkBoiledEncountered();
+
             if (visualRoot == null) visualRoot = transform;
             visualStartLocalPosition = visualRoot.localPosition;
             visualStartLocalRotation = visualRoot.localRotation;
@@ -68,8 +73,6 @@ namespace FallenForest.Monsters
         {
             if (triggered || GameProgress.Instance == null) return;
             triggered = true;
-            // Boiled is consumed only after the player really finds it. An unseen timed-out spawn may occur later.
-            GameProgress.Instance.MarkBoiledEncountered();
             StartCoroutine(ReactionRoutine());
         }
 
