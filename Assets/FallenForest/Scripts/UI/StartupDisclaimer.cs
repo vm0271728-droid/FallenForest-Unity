@@ -1,6 +1,7 @@
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem.UI;
 #endif
+using FallenForest.Core;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -8,9 +9,8 @@ using UnityEngine.UI;
 namespace FallenForest.UI
 {
     /// <summary>
-    /// Shows a one-per-launch safety warning before the player starts interacting
-    /// with the main menu. Built entirely at runtime so it cannot disappear because
-    /// a scene prefab was forgotten during automated builds.
+    /// One-per-launch warning shown before menu interaction. It follows the saved language, with
+    /// English as first-run default, and stays runtime-built so automated scene generation cannot omit it.
     /// </summary>
     public sealed class StartupDisclaimer : MonoBehaviour
     {
@@ -21,14 +21,14 @@ namespace FallenForest.UI
         {
             if (shownThisLaunch) return;
             shownThisLaunch = true;
-
-            GameObject root = new GameObject("FallenForest_Disclaimer");
+            GameObject root = new("FallenForest_Disclaimer");
             root.AddComponent<StartupDisclaimer>().Build();
         }
 
         private void Build()
         {
             DontDestroyOnLoad(gameObject);
+            bool ru = LocalizationSettings.IsRussian;
 
             Canvas canvas = gameObject.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -50,39 +50,43 @@ namespace FallenForest.UI
             backgroundImage.color = new Color(.008f, .008f, .01f, 1f);
             Stretch(background.GetComponent<RectTransform>());
 
-            Text heading = CreateText("Heading", transform, "ПРЕДУПРЕЖДЕНИЕ", 44, TextAnchor.MiddleCenter);
+            Text heading = CreateText(
+                "Heading",
+                transform,
+                ru ? "ПРЕДУПРЕЖДЕНИЕ" : "WARNING",
+                44,
+                TextAnchor.MiddleCenter);
             heading.fontStyle = FontStyle.Bold;
             heading.color = new Color(.92f, .92f, .92f, 1f);
             RectTransform headingRect = heading.rectTransform;
             headingRect.anchorMin = headingRect.anchorMax = new Vector2(.5f, .5f);
             headingRect.pivot = new Vector2(.5f, .5f);
             headingRect.sizeDelta = new Vector2(1200f, 90f);
-            headingRect.anchoredPosition = new Vector2(0f, 180f);
+            headingRect.anchoredPosition = new Vector2(0f, 205f);
 
-            string bodyText =
-                "В игре присутствуют скримеры, резкие звуки, тревожные сцены и мигающие визуальные эффекты.\n\n" +
-                "Если вы чувствительны к вспышкам или страдаете фоточувствительной эпилепсией, " +
-                "прекратите игру при появлении дискомфорта.";
+            string bodyText = ru
+                ? "В игре присутствуют скримеры, громкие и резкие звуки, тревожные сцены и мигающие визуальные эффекты.\n\n" +
+                  "Если вы чувствительны к вспышкам или страдаете фоточувствительной эпилепсией, прекратите игру при появлении дискомфорта.\n\n" +
+                  "Для полного погружения рекомендуются наушники."
+                : "This game contains jump scares, loud and sudden sounds, disturbing scenes, and flashing visual effects.\n\n" +
+                  "If you are sensitive to flashing lights or have photosensitive epilepsy, stop playing if you experience discomfort.\n\n" +
+                  "Headphones are recommended for the intended experience.";
 
-            Text body = CreateText("Body", transform, bodyText, 28, TextAnchor.MiddleCenter);
+            Text body = CreateText("Body", transform, bodyText, 27, TextAnchor.MiddleCenter);
             body.color = new Color(.78f, .79f, .8f, 1f);
             body.lineSpacing = 1.12f;
             RectTransform bodyRect = body.rectTransform;
             bodyRect.anchorMin = bodyRect.anchorMax = new Vector2(.5f, .5f);
             bodyRect.pivot = new Vector2(.5f, .5f);
-            bodyRect.sizeDelta = new Vector2(1300f, 300f);
+            bodyRect.sizeDelta = new Vector2(1340f, 360f);
             bodyRect.anchoredPosition = new Vector2(0f, -5f);
 
-            Button button = CreateButton(transform);
+            Button button = CreateButton(transform, ru ? "ПРОДОЛЖИТЬ" : "CONTINUE");
             button.onClick.AddListener(Dismiss);
-
             EnsureEventSystem();
         }
 
-        private void Dismiss()
-        {
-            StartCoroutine(FadeAndDestroy());
-        }
+        private void Dismiss() => StartCoroutine(FadeAndDestroy());
 
         private System.Collections.IEnumerator FadeAndDestroy()
         {
@@ -98,7 +102,7 @@ namespace FallenForest.UI
             Destroy(gameObject);
         }
 
-        private static Button CreateButton(Transform parent)
+        private static Button CreateButton(Transform parent, string value)
         {
             GameObject go = CreateUiObject("ContinueButton", parent);
             Image image = go.AddComponent<Image>();
@@ -116,9 +120,9 @@ namespace FallenForest.UI
             rect.anchorMin = rect.anchorMax = new Vector2(.5f, .5f);
             rect.pivot = new Vector2(.5f, .5f);
             rect.sizeDelta = new Vector2(430f, 82f);
-            rect.anchoredPosition = new Vector2(0f, -245f);
+            rect.anchoredPosition = new Vector2(0f, -275f);
 
-            Text label = CreateText("Label", go.transform, "ПРОДОЛЖИТЬ", 25, TextAnchor.MiddleCenter);
+            Text label = CreateText("Label", go.transform, value, 25, TextAnchor.MiddleCenter);
             label.fontStyle = FontStyle.Bold;
             label.color = new Color(.92f, .92f, .92f, 1f);
             Stretch(label.rectTransform);
@@ -128,7 +132,7 @@ namespace FallenForest.UI
         private static void EnsureEventSystem()
         {
             if (FindFirstObjectByType<EventSystem>() != null) return;
-            GameObject events = new GameObject("EventSystem");
+            GameObject events = new("EventSystem");
             events.AddComponent<EventSystem>();
 #if ENABLE_INPUT_SYSTEM
             events.AddComponent<InputSystemUIInputModule>();
@@ -140,7 +144,7 @@ namespace FallenForest.UI
 
         private static GameObject CreateUiObject(string name, Transform parent)
         {
-            GameObject go = new GameObject(name, typeof(RectTransform));
+            GameObject go = new(name, typeof(RectTransform));
             go.transform.SetParent(parent, false);
             return go;
         }
