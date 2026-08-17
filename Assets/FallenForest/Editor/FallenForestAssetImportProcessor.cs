@@ -80,9 +80,9 @@ namespace FallenForest.EditorTools
             settings.compressionFormat = AudioCompressionFormat.Vorbis;
             settings.quality = screamer ? .92f : .82f;
             settings.sampleRateSetting = AudioSampleRateSetting.PreserveSampleRate;
+            settings.preloadAudioData = !ambience;
             importer.defaultSampleSettings = settings;
             importer.loadInBackground = ambience;
-            importer.preloadAudioData = !ambience;
         }
     }
 }
