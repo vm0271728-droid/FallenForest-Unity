@@ -21,6 +21,12 @@ namespace FallenForest.EditorTools
         {
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
+            // All import, material and shader validation below must happen in the same Android
+            // target context as the final APK. Otherwise CI could validate a desktop shader/import
+            // path and only discover Android-specific failures minutes later in BuildPipeline.
+            EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
+            EditorUserBuildSettings.buildAppBundle = false;
+
             FallenForestRenderPipelineSetup.EnsureConfigured();
             FallenForestUserContentIntegrator.IntegrateBeforeSceneAssembly();
             FallenForestTreePackIntegrator.BuildAvailable();
@@ -62,8 +68,6 @@ namespace FallenForest.EditorTools
                 throw new UnityEditor.Build.BuildFailedException("Final MainMenu/Forest scenes are missing after scene assembly.");
 
             Directory.CreateDirectory("Builds/Android");
-            EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
-            EditorUserBuildSettings.buildAppBundle = false;
 
             PlayerSettings.companyName = "Fallen Forest";
             PlayerSettings.productName = "Fallen Forest";
