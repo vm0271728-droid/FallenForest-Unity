@@ -1,0 +1,5 @@
+Poly Haven assets used in this development source:
+- Forest Ground 03
+- Pine Bark
+
+The source assets are CC0. 4K originals were downloaded from Poly Haven and downscaled to 2048x2048 for the mobile Unity project.

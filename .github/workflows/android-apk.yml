@@ -1,0 +1,91 @@
+name: Build Fallen Forest APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Assets/**'
+      - 'Packages/**'
+      - 'ProjectSettings/**'
+      - '.github/workflows/android-apk.yml'
+
+concurrency:
+  group: fallen-forest-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Unity 6 Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout project and LFS assets
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Verify required Unity credentials exist
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$UNITY_LICENSE" || { echo 'Missing GitHub secret: UNITY_LICENSE'; exit 2; }
+          test -n "$UNITY_EMAIL" || { echo 'Missing GitHub secret: UNITY_EMAIL'; exit 2; }
+          test -n "$UNITY_PASSWORD" || { echo 'Missing GitHub secret: UNITY_PASSWORD'; exit 2; }
+
+      - name: Verify release media and exact creature models are present
+        run: |
+          set -euo pipefail
+          test -f Assets/FallenForest/Audio/Screamers/jakes-screamer.mp3
+          test -f Assets/FallenForest/Audio/Screamers/the-screamer-shared-between-mallie-and-jenny.mp3
+          test ! -f Assets/FallenForest/Audio/Screamers/amazing-grace-analog-horror.mp3
+          test -f Assets/FallenForest/Video/boiled_one_jumpscare.mp4
+          test -d Assets/FallenForest/Art/Models/DoctorNowhere/Locust
+          test -d Assets/FallenForest/Art/Models/DoctorNowhere/Boiled
+          find Assets/FallenForest/Art/Models/DoctorNowhere/Locust -type f \( -iname '*.fbx' -o -iname '*.obj' -o -iname '*.gltf' -o -iname '*.glb' \) -print -quit | grep -q .
+          find Assets/FallenForest/Art/Models/DoctorNowhere/Boiled -type f \( -iname '*.fbx' -o -iname '*.obj' -o -iname '*.gltf' -o -iname '*.glb' \) -print -quit | grep -q .
+
+      - name: Free runner disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: false
+          swap-storage: false
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-Android-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-Android-
+
+      - name: Build development-signed APK
+        id: unity_build
+        uses: game-ci/unity-builder@v5
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: auto
+          targetPlatform: Android
+          buildMethod: FallenForest.EditorTools.FallenForestProjectBuilder.CIBuildAndroid
+          androidExportType: androidPackage
+          allowDirtyBuild: true
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fallen-Forest-Android-APK
+          path: Builds/Android/Fallen_Forest_1.0.0.apk
+          if-no-files-found: error
+          compression-level: 0

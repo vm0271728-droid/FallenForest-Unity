@@ -1,0 +1,13 @@
+using UnityEngine;
+namespace FallenForest.Player
+{
+    public sealed class PlayerFoley : MonoBehaviour
+    {
+        [SerializeField] private PlayerMotor motor; [SerializeField] private Terrain terrain; [SerializeField] private AudioSource stepSource,breathSource; [SerializeField] private AudioClip[] forestSteps,pathSteps; [SerializeField] private AudioClip finalRunBreath; [SerializeField] private float walkStepInterval=.52f,finalRunStepInterval=.31f,pathThreshold=.42f; private float stepTimer; private int lastForest=-1,lastPath=-1;
+        private void Awake(){if(motor==null)motor=GetComponent<PlayerMotor>();if(terrain==null)terrain=Terrain.activeTerrain;stepTimer=.16f;}
+        private void Update(){if(motor==null)return;UpdateBreathing();float speed=motor.NormalizedSpeed;if(!motor.IsMoving||speed<.08f){stepTimer=Mathf.Min(stepTimer,.10f);return;}float interval=(motor.IsFinalRun?finalRunStepInterval:walkStepInterval)/Mathf.Lerp(.72f,1.08f,speed);stepTimer-=Time.deltaTime;if(stepTimer>0)return;PlayStep(IsOnPath());stepTimer=interval*Random.Range(.94f,1.06f);}
+        private void UpdateBreathing(){if(breathSource==null||finalRunBreath==null)return;float wanted=motor.IsFinalRun?.52f:0f;breathSource.volume=Mathf.MoveTowards(breathSource.volume,wanted,Time.deltaTime*.40f);if(motor.IsFinalRun&&!breathSource.isPlaying){breathSource.clip=finalRunBreath;breathSource.loop=true;breathSource.pitch=1f;breathSource.Play();}else if(!motor.IsFinalRun&&breathSource.isPlaying&&breathSource.volume<=.005f)breathSource.Stop();}
+        private bool IsOnPath(){if(terrain==null||terrain.terrainData==null||terrain.terrainData.alphamapLayers<2)return false;TerrainData td=terrain.terrainData;Vector3 local=transform.position-terrain.transform.position;int x=Mathf.Clamp(Mathf.RoundToInt(Mathf.Clamp01(local.x/Mathf.Max(.01f,td.size.x))*(td.alphamapWidth-1)),0,td.alphamapWidth-1),z=Mathf.Clamp(Mathf.RoundToInt(Mathf.Clamp01(local.z/Mathf.Max(.01f,td.size.z))*(td.alphamapHeight-1)),0,td.alphamapHeight-1);return td.GetAlphamaps(x,z,1,1)[0,0,1]>=pathThreshold;}
+        private void PlayStep(bool path){if(stepSource==null)return;AudioClip[] clips=path?pathSteps:forestSteps;if(clips==null||clips.Length==0)return;int last=path?lastPath:lastForest,index=Random.Range(0,clips.Length);if(clips.Length>1&&index==last)index=(index+Random.Range(1,clips.Length))%clips.Length;AudioClip clip=clips[index];if(clip==null)return;if(path)lastPath=index;else lastForest=index;stepSource.pitch=Random.Range(.94f,1.055f);stepSource.volume=motor.IsFinalRun?Random.Range(.66f,.82f):Random.Range(.46f,.61f);stepSource.PlayOneShot(clip);}
+    }
+}

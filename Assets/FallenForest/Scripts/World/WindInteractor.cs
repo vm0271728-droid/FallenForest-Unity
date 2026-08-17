@@ -1,0 +1,1 @@
+using UnityEngine;namespace FallenForest.World{public sealed class WindInteractor:MonoBehaviour{[SerializeField]private Transform player;[SerializeField]private float interactionRadius=1.25f;private void Update(){if(player==null)return;Shader.SetGlobalVector("_FF_PlayerWS",player.position);Shader.SetGlobalFloat("_FF_GrassBendRadius",interactionRadius);}}}

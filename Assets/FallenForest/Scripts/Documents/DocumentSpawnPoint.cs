@@ -1,0 +1,1 @@
+using UnityEngine; namespace FallenForest.Documents { public sealed class DocumentSpawnPoint:MonoBehaviour { [SerializeField]private bool enabledForSpawn=true; public bool EnabledForSpawn=>enabledForSpawn; } }
