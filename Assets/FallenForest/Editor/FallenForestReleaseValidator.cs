@@ -2,20 +2,23 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using FallenForest.Audio;
 using FallenForest.Cinematics;
 using FallenForest.Documents;
 using FallenForest.Monsters;
+using FallenForest.Player;
+using FallenForest.UI;
+using FallenForest.World;
 using UnityEditor;
 using UnityEditor.Build;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.Video;
 
 namespace FallenForest.EditorTools
 {
-    /// <summary>
-    /// Validates actual Fallen Forest release dependencies. Historical temporary filenames are not
-    /// release gates; exact user assets, generated gameplay prefabs/scenes and forbidden media are.
-    /// </summary>
+    /// <summary>Validates real release assets plus the generated scene wiring required for playable APKs.</summary>
     public static class FallenForestReleaseValidator
     {
         private const string Root = "Assets/FallenForest";
@@ -59,10 +62,14 @@ namespace FallenForest.EditorTools
             RequireAsset<GameObject>(FinalUserAssetPrefabBuilder.ArmsPrefab, "final first-person arms prefab", errors);
             RequireAsset<GameObject>(FinalUserAssetPrefabBuilder.FlashlightPrefab, "final flashlight prefab", errors);
             RequirePrefabWith<DocumentPickup>(FinalUserAssetPrefabBuilder.DocumentPrefab, "final document pickup prefab", errors);
-            RequirePrefabWith<CinematicPickupVehicle>(FinalUserAssetPrefabBuilder.PickupPrefab, "physics-ready final pickup truck prefab", errors);
+            GameObject pickup = RequirePrefabWith<CinematicPickupVehicle>(FinalUserAssetPrefabBuilder.PickupPrefab, "physics-ready final pickup truck prefab", errors);
+            if (pickup != null && pickup.GetComponentsInChildren<WheelCollider>(true).Length != 4)
+                errors.Add("Final pickup prefab must contain exactly four WheelCollider components.");
 
-            RequireAsset<SceneAsset>(Root + "/Scenes/MainMenu.unity", "MainMenu scene", errors);
-            RequireAsset<SceneAsset>(Root + "/Scenes/Forest.unity", "Forest scene", errors);
+            SceneAsset mainMenu = RequireAsset<SceneAsset>(Root + "/Scenes/MainMenu.unity", "MainMenu scene", errors);
+            SceneAsset forest = RequireAsset<SceneAsset>(Root + "/Scenes/Forest.unity", "Forest scene", errors);
+            if (mainMenu != null && forest != null)
+                ValidateGeneratedSceneWiring(errors);
 
             Texture2D icon = AssetDatabase.LoadAssetAtPath<Texture2D>(Root + "/Art/Icon/app_icon_1024.png");
             if (icon == null)
@@ -85,6 +92,60 @@ namespace FallenForest.EditorTools
             }
         }
 
+        private static void ValidateGeneratedSceneWiring(List<string> errors)
+        {
+            Scene previous = SceneManager.GetActiveScene();
+            try
+            {
+                EditorSceneManager.OpenScene(Root + "/Scenes/Forest.unity", OpenSceneMode.Single);
+                RequireSceneComponent<PlayerMotor>("PlayerMotor", errors);
+                RequireSceneComponent<CameraMotion>("CameraMotion", errors);
+                RequireSceneComponent<MonsterDirector>("MonsterDirector", errors);
+                RequireSceneComponent<FlashlightMonsterDetector>("Flashlight monster detector", errors);
+                RequireSceneComponent<WakeUpSequence>("opening/wake-up sequence", errors);
+                RequireSceneComponent<BoiledOneSequence>("Boiled One video sequence", errors);
+                RequireSceneComponent<JumpscareController>("Locust jumpscare controller", errors);
+                RequireSceneComponent<DeathMenuController>("death/continue menu", errors);
+                RequireSceneComponent<AudioDirector>("forest audio director", errors);
+                RequireSceneComponent<WindInteractor>("grass/player wind interaction", errors);
+                RequireSceneComponent<RuntimeQualityController>("mobile runtime quality controller", errors);
+                RequireSceneComponent<EndSequence>("final road ending sequence", errors);
+
+                CinematicPickupVehicle vehicle = Object.FindFirstObjectByType<CinematicPickupVehicle>(FindObjectsInactive.Include);
+                if (vehicle == null)
+                    errors.Add("Forest scene has no physical cinematic pickup vehicle.");
+                else if (vehicle.GetComponentsInChildren<WheelCollider>(true).Length != 4)
+                    errors.Add("Forest scene cinematic pickup does not contain exactly four WheelColliders.");
+
+                EditorSceneManager.OpenScene(Root + "/Scenes/MainMenu.unity", OpenSceneMode.Single);
+                RequireSceneComponent<MenuLocalizationController>("menu localization controller", errors);
+                RequireSceneComponent<CreditsPanelController>("full Credits panel controller", errors);
+
+                bool menuTrackWired = false;
+                foreach (AudioSource source in Object.FindObjectsByType<AudioSource>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (source.clip != null && source.clip.name.IndexOf("creepy_forest_menu", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        menuTrackWired = true;
+                        break;
+                    }
+                }
+                if (!menuTrackWired)
+                    errors.Add("MainMenu scene does not have the vetted menu audio track wired to an AudioSource.");
+            }
+            finally
+            {
+                if (previous.IsValid() && !string.IsNullOrEmpty(previous.path))
+                    EditorSceneManager.OpenScene(previous.path, OpenSceneMode.Single);
+            }
+        }
+
+        private static void RequireSceneComponent<T>(string label, List<string> errors) where T : Component
+        {
+            if (Object.FindFirstObjectByType<T>(FindObjectsInactive.Include) == null)
+                errors.Add($"Generated scene is missing {label} ({typeof(T).Name}).");
+        }
+
         private static void RequireExternalModel(string token, List<string> errors)
         {
             string folder = Root + "/Art/Models/DoctorNowhere/" + token;
@@ -93,7 +154,6 @@ namespace FallenForest.EditorTools
                 errors.Add($"Missing exact {token} model folder: {folder}");
                 return;
             }
-
             if (FindRendererBearingImportedModel(folder, token) != null) return;
             errors.Add($"Exact downloadable {token} model has not been imported into {folder}. Placeholder geometry is forbidden in release APKs.");
         }
@@ -127,11 +187,12 @@ namespace FallenForest.EditorTools
             return fallback;
         }
 
-        private static void RequirePrefabWith<T>(string path, string label, List<string> errors) where T : Component
+        private static GameObject RequirePrefabWith<T>(string path, string label, List<string> errors) where T : Component
         {
             GameObject prefab = RequireAsset<GameObject>(path, label, errors);
             if (prefab != null && prefab.GetComponentInChildren<T>(true) == null)
                 errors.Add($"{label} is present but has no {typeof(T).Name}: {path}");
+            return prefab;
         }
 
         private static T RequireAsset<T>(string path, string label, List<string> errors) where T : UnityEngine.Object

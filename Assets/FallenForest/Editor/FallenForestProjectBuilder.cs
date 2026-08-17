@@ -21,23 +21,19 @@ namespace FallenForest.EditorTools
         {
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
-            // Build exact user-derived source prefabs first.
             FallenForestUserContentIntegrator.IntegrateBeforeSceneAssembly();
             FallenForestGrassMaterialBuilder.ApplyIfAvailable();
 
-            // The supplied pickup is one merged FBX; turn it into a real Rigidbody + 4 WheelCollider
-            // vehicle before any finale scene references are serialized.
             PickupWheelMeshSplitter.BuildIfAvailable();
-            // Re-apply authored PBR materials after the pickup splitter has replaced Pickup_Final.
-            FallenForestUserMaterialBuilder.ApplyIfAvailable();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
-            // Scenes are source-generated from runtime systems, then finalized against latest rules.
             FallenForestSceneAssembler.EnsureRequiredScenesForCI();
             FallenForestUserContentIntegrator.PatchGeneratedForestScene();
             FallenForestFinaleIntegrator.FinalizeForestEnding();
+            FallenForestRuntimeSceneIntegrator.FinalizeForestRuntimeSystems();
             FallenForestMenuFinalizer.FinalizeMainMenu();
+            FallenForestRuntimeSceneIntegrator.FinalizeMainMenuRuntimeSystems();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
             FallenForestReleaseValidator.ValidateReleaseOrThrow();
 
@@ -57,6 +53,7 @@ namespace FallenForest.EditorTools
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel23;
             PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;
+            PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
 
             EditorBuildSettings.scenes = new[]
             {

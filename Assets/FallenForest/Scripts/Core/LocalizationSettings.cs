@@ -9,10 +9,7 @@ namespace FallenForest.Core
         Russian = 1
     }
 
-    /// <summary>
-    /// Small persistent localization core. English is always the first-run default.
-    /// More languages can be added without changing scene flow or save data.
-    /// </summary>
+    /// <summary>Persistent localization core. English is always the first-run default.</summary>
     public static class LocalizationSettings
     {
         private const string LanguageKey = "ff_language";
@@ -45,13 +42,16 @@ namespace FallenForest.Core
                 "settings" => ru ? "НАСТРОЙКИ" : "SETTINGS",
                 "quit" => ru ? "ВЫЙТИ" : "QUIT",
                 "back" => ru ? "НАЗАД" : "BACK",
+                "main_menu" => ru ? "ГЛАВНОЕ МЕНЮ" : "MAIN MENU",
                 "sensitivity" => ru ? "ЧУВСТВИТЕЛЬНОСТЬ" : "SENSITIVITY",
                 "camera_shake" => ru ? "ТРЯСКА КАМЕРЫ" : "CAMERA SHAKE",
                 "language" => ru ? "ЯЗЫК" : "LANGUAGE",
                 "language_value" => ru ? "РУССКИЙ" : "ENGLISH",
+                "loading" => ru ? "Загрузка..." : "Loading...",
                 "documents" => ru ? "Документы" : "Documents",
                 "run" => ru ? "БЕГИ" : "RUN",
                 "end" => ru ? "КОНЕЦ" : "END",
+                "you_died" => ru ? "ВЫ ПОГИБЛИ" : "YOU DIED",
                 "continue" => ru ? "ПРОДОЛЖИТЬ" : "CONTINUE",
                 "credits" => ru ? "АВТОРЫ" : "CREDITS",
                 "idea" => ru ? "Идея: Meric23" : "Idea by: Meric23",
