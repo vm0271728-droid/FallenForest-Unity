@@ -28,13 +28,19 @@ namespace FallenForest.EditorTools
 
             FallenForestUserContentIntegrator.IntegrateBeforeSceneAssembly();
 
-            // The exact prefabs are built above. Apply their real PBR textures before any scene
-            // instances are created; previously this pass existed but was never called in CI.
-            FallenForestUserMaterialBuilder.ApplyIfAvailable();
+            // Structural prefab passes must finish before the final user-material pass.
+            // PickupWheelMeshSplitter rebuilds Pickup_Final from the merged FBX; applying the
+            // PBR material before that split gets overwritten by the rebuilt source renderers.
             FallenForestGrassMaterialBuilder.ApplyIfAvailable();
             FallenForestCreatureMotionIntegrator.Apply();
-
             PickupWheelMeshSplitter.BuildIfAvailable();
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+
+            // Apply exact user PBR textures only after all structural prefab rebuilds. This makes
+            // the material state that readiness validation sees the same state scene instances use.
+            FallenForestUserMaterialBuilder.ApplyIfAvailable();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
