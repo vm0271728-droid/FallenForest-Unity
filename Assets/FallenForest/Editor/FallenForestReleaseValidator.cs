@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using FallenForest.Cinematics;
 using FallenForest.Documents;
 using FallenForest.Monsters;
 using UnityEditor;
@@ -31,7 +32,6 @@ namespace FallenForest.EditorTools
             var errors = new List<string>();
             var warnings = new List<string>();
 
-            // Exact user source content. Creature folders must contain imported renderer-bearing models.
             RequireExternalModel("Locust", errors);
             RequireExternalModel("Boiled", errors);
             RequireImportedModel(Root + "/Art/Vegetation/UserGrass", "Grass", "user three-variant grass FBX", errors);
@@ -40,7 +40,6 @@ namespace FallenForest.EditorTools
             RequireImportedModel(Root + "/Art/Vehicles/Pickup", "pickup", "user pickup truck", errors);
             RequireImportedModel(Root + "/Art/Documents/UserDocument", "document", "user document folder model", errors);
 
-            // Audio downloaded by the vetted CI fetcher plus exact user screamer media.
             RequireAsset<AudioClip>(Root + "/Audio/Menu/creepy_forest_menu.ogg", "CC0 horror menu track", errors);
             RequireAsset<AudioClip>(Root + "/Audio/Ambience/forest_ambience_cc0.mp3", "CC0 base forest ambience", errors);
             RequireAsset<AudioClip>(Root + "/Audio/Ambience/ambient_horror_cc0.ogg", "CC0 horror ambience layer", errors);
@@ -52,7 +51,6 @@ namespace FallenForest.EditorTools
             if (File.Exists(forbidden) || AssetDatabase.LoadAssetAtPath<AudioClip>(forbidden) != null)
                 errors.Add("Forbidden file is still present: amazing-grace-analog-horror.mp3");
 
-            // Real user-derived prefabs created by the deterministic integration pass.
             RequirePrefabWith<LocustAI>(Root + "/Prefabs/Locust_Final.prefab", "final Locust gameplay prefab", errors);
             RequirePrefabWith<BoiledOneEncounter>(Root + "/Prefabs/BoiledOne_Final.prefab", "final Boiled One gameplay prefab", errors);
             RequireAsset<GameObject>(Root + "/Prefabs/Vegetation/UserGrass_Large.prefab", "large user grass prefab", errors);
@@ -61,20 +59,17 @@ namespace FallenForest.EditorTools
             RequireAsset<GameObject>(FinalUserAssetPrefabBuilder.ArmsPrefab, "final first-person arms prefab", errors);
             RequireAsset<GameObject>(FinalUserAssetPrefabBuilder.FlashlightPrefab, "final flashlight prefab", errors);
             RequirePrefabWith<DocumentPickup>(FinalUserAssetPrefabBuilder.DocumentPrefab, "final document pickup prefab", errors);
-            RequireAsset<GameObject>(FinalUserAssetPrefabBuilder.PickupPrefab, "final pickup truck visual prefab", errors);
+            RequirePrefabWith<CinematicPickupVehicle>(FinalUserAssetPrefabBuilder.PickupPrefab, "physics-ready final pickup truck prefab", errors);
 
             RequireAsset<SceneAsset>(Root + "/Scenes/MainMenu.unity", "MainMenu scene", errors);
             RequireAsset<SceneAsset>(Root + "/Scenes/Forest.unity", "Forest scene", errors);
 
-            // An icon is mandatory for store packaging, but it must not block the first physical APK test.
             Texture2D icon = AssetDatabase.LoadAssetAtPath<Texture2D>(Root + "/Art/Icon/app_icon_1024.png");
             if (icon == null)
                 warnings.Add("Android store icon is not authored yet; development APK may use the Unity/default icon.");
             else if (icon.width < 1024 || icon.height < 1024)
                 warnings.Add($"Android icon should be >=1024x1024 before store release; imported {icon.width}x{icon.height}.");
 
-            // Optional stings/engine audio enhance the final mix but their absence must not fabricate a
-            // build failure. Gameplay code already treats these clips as optional references.
             WarnMissing<AudioClip>(Root + "/Audio/Monster/locust_near_sting.wav", "Locust near sting", warnings);
             WarnMissing<AudioClip>(Root + "/Audio/Monster/boiled_trigger_sting.wav", "Boiled trigger sting", warnings);
             WarnMissing<AudioClip>(Root + "/Audio/Ending/car_pass_engine.wav", "ending pickup engine", warnings);
