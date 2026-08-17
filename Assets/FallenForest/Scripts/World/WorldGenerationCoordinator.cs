@@ -5,8 +5,8 @@ namespace FallenForest.World
 {
     /// <summary>
     /// Establishes the required generation order for the final forest:
-    /// terrain relief -> ground runtime anchors -> terrain-following trails -> trees/grass.
-    /// DocumentSpawner runs later at normal script order and therefore samples the finished world.
+    /// terrain relief -> grounded anchors -> terrain-following trails -> trees -> physical props.
+    /// DocumentSpawner runs later and therefore samples the finished collision/occlusion world.
     /// </summary>
     [DefaultExecutionOrder(-1000)]
     public sealed class WorldGenerationCoordinator : MonoBehaviour
@@ -14,6 +14,7 @@ namespace FallenForest.World
         [SerializeField] private TerrainReliefGenerator terrainRelief;
         [SerializeField] private TrailNetworkGenerator trailNetwork;
         [SerializeField] private ForestScatterer forestScatterer;
+        [SerializeField] private ForestPropScatterer propScatterer;
         [SerializeField] private bool generateOnStart = true;
 
         public bool GenerationComplete { get; private set; }
@@ -46,9 +47,10 @@ namespace FallenForest.World
 
             trailNetwork?.Generate();
             forestScatterer?.Generate();
+            propScatterer?.Generate();
 
             GenerationComplete = true;
-            Debug.Log("Fallen Forest: terrain, grounded player/pickup, trails and dense forest generation completed in deterministic order.", this);
+            Debug.Log("Fallen Forest: terrain, trails, canonical trees and physical forest props generated in deterministic order.", this);
         }
 
         private void ResolveReferences()
@@ -59,6 +61,8 @@ namespace FallenForest.World
                 trailNetwork = FindFirstObjectByType<TrailNetworkGenerator>(FindObjectsInactive.Include);
             if (forestScatterer == null)
                 forestScatterer = FindFirstObjectByType<ForestScatterer>(FindObjectsInactive.Include);
+            if (propScatterer == null)
+                propScatterer = FindFirstObjectByType<ForestPropScatterer>(FindObjectsInactive.Include);
         }
 
         private static void EnsureTerrainCollider(Terrain terrain)
