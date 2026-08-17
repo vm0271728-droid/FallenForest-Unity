@@ -4,11 +4,10 @@ using UnityEngine;
 namespace FallenForest.World
 {
     /// <summary>
-    /// Builds a small deterministic network of narrow trails that hug the Terrain.
-    /// Each segment also owns a TrailZone trigger so documents avoid the trail and
-    /// procedural grass naturally thins from the trail centre toward the forest.
+    /// Builds a small deterministic network of narrow trails that follows the Terrain surface.
+    /// Every segment also gets a TrailZone trigger so documents stay off the walked line, trees do
+    /// not block it and grass smoothly changes from almost absent on dirt to dense forest growth.
     /// </summary>
-    [RequireComponent(typeof(Transform))]
     public sealed class TrailNetworkGenerator : MonoBehaviour
     {
         [SerializeField] private Terrain terrain;
@@ -23,7 +22,7 @@ namespace FallenForest.World
         [SerializeField] private bool generateOnAwake = true;
         [SerializeField] private Transform generatedRoot;
 
-        private readonly List<GameObject> generatedObjects = new();
+        private readonly List<Mesh> generatedMeshes = new();
         private Material runtimeMaterial;
 
         private void Awake()
@@ -35,17 +34,11 @@ namespace FallenForest.World
         [ContextMenu("Generate Trail Network")]
         public void Generate()
         {
-            Clear();
+            EnsureRoot();
+            ClearGeneratedChildren();
+
             if (terrain == null) terrain = Terrain.activeTerrain;
             if (terrain == null || terrain.terrainData == null) return;
-
-            if (generatedRoot == null)
-            {
-                GameObject root = new("GeneratedTrails");
-                root.transform.SetParent(transform, false);
-                generatedRoot = root.transform;
-                generatedObjects.Add(root);
-            }
 
             Material material = trailMaterial != null ? trailMaterial : BuildRuntimeMaterial();
             var rng = new System.Random(seed);
@@ -58,6 +51,22 @@ namespace FallenForest.World
                 BuildRibbon(samples, material, i);
                 BuildZones(samples, i);
             }
+        }
+
+        private void EnsureRoot()
+        {
+            if (generatedRoot != null) return;
+
+            Transform existing = transform.Find("GeneratedTrails");
+            if (existing != null)
+            {
+                generatedRoot = existing;
+                return;
+            }
+
+            GameObject root = new("GeneratedTrails");
+            root.transform.SetParent(transform, false);
+            generatedRoot = root.transform;
         }
 
         private List<Vector3> BuildControlPoints(int trailIndex, System.Random rng)
@@ -81,7 +90,7 @@ namespace FallenForest.World
                     break;
             }
 
-            int controls = 7;
+            const int controls = 7;
             List<Vector3> result = new(controls);
             for (int i = 0; i < controls; i++)
             {
@@ -126,7 +135,7 @@ namespace FallenForest.World
                 }
             }
 
-            Vector3 last = controls[^1];
+            Vector3 last = controls[controls.Count - 1];
             last.y = GroundY(last) + surfaceOffset;
             result.Add(last);
             return result;
@@ -144,14 +153,15 @@ namespace FallenForest.World
             {
                 Vector3 forward;
                 if (i == 0) forward = points[1] - points[0];
-                else if (i == count - 1) forward = points[^1] - points[^2];
+                else if (i == count - 1) forward = points[count - 1] - points[count - 2];
                 else forward = points[i + 1] - points[i - 1];
+
                 forward = Vector3.ProjectOnPlane(forward, Vector3.up).normalized;
                 if (forward.sqrMagnitude < .001f) forward = Vector3.forward;
 
                 Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
-                Vector3 localCentre = transform.InverseTransformPoint(points[i]);
-                Vector3 localRight = transform.InverseTransformDirection(right);
+                Vector3 localCentre = generatedRoot.InverseTransformPoint(points[i]);
+                Vector3 localRight = generatedRoot.InverseTransformDirection(right).normalized;
                 float half = trailWidth * .5f;
                 vertices[i * 2] = localCentre - localRight * half;
                 vertices[i * 2 + 1] = localCentre + localRight * half;
@@ -187,15 +197,15 @@ namespace FallenForest.World
             mesh.RecalculateNormals();
             mesh.RecalculateTangents();
             mesh.RecalculateBounds();
+            generatedMeshes.Add(mesh);
 
             GameObject go = new($"Trail_{index + 1:00}_Ribbon", typeof(MeshFilter), typeof(MeshRenderer));
-            go.transform.SetParent(transform, false);
+            go.transform.SetParent(generatedRoot, false);
             go.GetComponent<MeshFilter>().sharedMesh = mesh;
             MeshRenderer renderer = go.GetComponent<MeshRenderer>();
             renderer.sharedMaterial = material;
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             renderer.receiveShadows = true;
-            generatedObjects.Add(go);
         }
 
         private void BuildZones(List<Vector3> points, int index)
@@ -209,14 +219,14 @@ namespace FallenForest.World
                 if (length < .1f) continue;
 
                 GameObject zone = new($"Trail_{index + 1:00}_Zone_{i + 1:000}");
-                zone.transform.SetParent(transform, true);
+                zone.transform.SetParent(generatedRoot, true);
                 zone.transform.position = (a + b) * .5f + Vector3.up * (zoneHeight * .5f - .2f);
                 zone.transform.rotation = Quaternion.LookRotation(flat.normalized, Vector3.up);
+
                 BoxCollider collider = zone.AddComponent<BoxCollider>();
                 collider.isTrigger = true;
                 collider.size = new Vector3(trailWidth, zoneHeight, length + .3f);
                 zone.AddComponent<TrailZone>();
-                generatedObjects.Add(zone);
             }
         }
 
@@ -240,9 +250,11 @@ namespace FallenForest.World
         private Material BuildRuntimeMaterial()
         {
             if (runtimeMaterial != null) return runtimeMaterial;
+
             Shader shader = Shader.Find("Universal Render Pipeline/Lit");
             if (shader == null) shader = Shader.Find("Standard");
             runtimeMaterial = shader != null ? new Material(shader) : null;
+
             if (runtimeMaterial != null)
             {
                 runtimeMaterial.name = "Trail_Runtime_Material";
@@ -258,30 +270,35 @@ namespace FallenForest.World
         [ContextMenu("Clear Trail Network")]
         public void Clear()
         {
-            for (int i = generatedObjects.Count - 1; i >= 0; i--)
-            {
-                GameObject go = generatedObjects[i];
-                if (go == null) continue;
-                if (Application.isPlaying) Destroy(go); else DestroyImmediate(go);
-            }
-            generatedObjects.Clear();
+            EnsureRoot();
+            ClearGeneratedChildren();
+        }
 
+        private void ClearGeneratedChildren()
+        {
             if (generatedRoot != null)
             {
                 for (int i = generatedRoot.childCount - 1; i >= 0; i--)
-                {
-                    GameObject child = generatedRoot.GetChild(i).gameObject;
-                    if (Application.isPlaying) Destroy(child); else DestroyImmediate(child);
-                }
+                    DestroyUnityObject(generatedRoot.GetChild(i).gameObject);
             }
+
+            for (int i = generatedMeshes.Count - 1; i >= 0; i--)
+                if (generatedMeshes[i] != null)
+                    DestroyUnityObject(generatedMeshes[i]);
+            generatedMeshes.Clear();
         }
 
         private void OnDestroy()
         {
+            ClearGeneratedChildren();
             if (runtimeMaterial != null)
-            {
-                if (Application.isPlaying) Destroy(runtimeMaterial); else DestroyImmediate(runtimeMaterial);
-            }
+                DestroyUnityObject(runtimeMaterial);
+        }
+
+        private static void DestroyUnityObject(Object obj)
+        {
+            if (obj == null) return;
+            if (Application.isPlaying) Destroy(obj); else DestroyImmediate(obj);
         }
 
         private static Vector3 CatmullRom(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, float t)
