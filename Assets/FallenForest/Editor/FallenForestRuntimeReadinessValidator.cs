@@ -15,12 +15,15 @@ namespace FallenForest.EditorTools
 {
     /// <summary>
     /// Runtime-oriented gate for failures a successful compile cannot prove: real textured assets,
-    /// final user trees, terrain physics, viewmodel motion, adaptive lighting and hallucination wiring.
+    /// all user tree sources, terrain physics, creature motion, viewmodel motion, adaptive lighting,
+    /// pickup state and hallucination wiring.
     /// </summary>
     public static class FallenForestRuntimeReadinessValidator
     {
         private const string ForestScene = "Assets/FallenForest/Scenes/Forest.unity";
         private const string BlackSpruce = "Assets/FallenForest/Prefabs/Vegetation/Trees/BlackSpruce_LOD.prefab";
+        private const string LowPolyDir = "Assets/FallenForest/Prefabs/Vegetation/LowPolyForest";
+        private const string LowPolySource = "Assets/FallenForest/Art/Vegetation/UserTrees/LowPolyForest/Source/Extracted/Tree_Pack.fbx";
 
         public static void ValidateOrThrow()
         {
@@ -34,9 +37,34 @@ namespace FallenForest.EditorTools
             RequireTexturedPrefab("Assets/FallenForest/Prefabs/BoiledOne_Final.prefab", "Boiled One", errors);
             RequireTexturedPrefab(BlackSpruce, "canonical Black Spruce", errors);
 
+            if (AssetDatabase.LoadAssetAtPath<GameObject>(LowPolySource) == null)
+                errors.Add("Extracted user low-poly Tree_Pack.fbx is missing from the Unity asset database.");
+
+            string lowPolyTreePath = FindGeneratedPrefabPath("LowPolyTree_");
+            if (string.IsNullOrEmpty(lowPolyTreePath))
+                errors.Add("No LowPolyTree prefab was built from the user's Tree_Pack.fbx.");
+            else
+                RequireTexturedPrefab(lowPolyTreePath, "low-poly user tree", errors);
+
             GameObject locustPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/FallenForest/Prefabs/Locust_Final.prefab");
-            if (locustPrefab != null && locustPrefab.GetComponentInChildren<LocustProceduralAnimator>(true) == null)
-                errors.Add("Final Locust prefab has no authored AnimatorController and no LocustProceduralAnimator fallback.");
+            if (locustPrefab != null)
+            {
+                if (locustPrefab.GetComponent<LocustAI>() == null)
+                    errors.Add("Final Locust prefab has no LocustAI.");
+                if (locustPrefab.GetComponentInChildren<LocustProceduralAnimator>(true) == null)
+                    errors.Add("Final Locust prefab has no skeletal procedural motion fallback.");
+            }
+
+            GameObject boiledPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/FallenForest/Prefabs/BoiledOne_Final.prefab");
+            if (boiledPrefab != null)
+            {
+                if (boiledPrefab.GetComponent<BoiledOneEncounter>() == null)
+                    errors.Add("Final Boiled One prefab has no BoiledOneEncounter.");
+                if (boiledPrefab.GetComponent<BoiledProceduralAnimator>() == null)
+                    errors.Add("Final Boiled One prefab has no skeletal Body/JiggleEye motion fallback.");
+                if (boiledPrefab.GetComponent<BoiledStressAudio>() == null)
+                    errors.Add("Final Boiled One prefab has no progressive breathing/tinnitus stress layer.");
+            }
 
             GameObject treePrefab = AssetDatabase.LoadAssetAtPath<GameObject>(BlackSpruce);
             if (treePrefab != null)
@@ -77,10 +105,11 @@ namespace FallenForest.EditorTools
                             errors.Add("Forest Terrain has no TerrainLayer and would render as an untextured/default floor.");
                     }
 
-                    if (UnityEngine.Object.FindFirstObjectByType<WorldGenerationCoordinator>(FindObjectsInactive.Include) == null)
-                        errors.Add("Forest scene has no WorldGenerationCoordinator for terrain-first runtime generation.");
+                    WorldGenerationCoordinator coordinator = UnityEngine.Object.FindFirstObjectByType<WorldGenerationCoordinator>(FindObjectsInactive.Include);
+                    if (coordinator == null)
+                        errors.Add("Forest scene has no WorldGenerationCoordinator for deterministic generation.");
                     if (UnityEngine.Object.FindFirstObjectByType<ViewmodelMotionController>(FindObjectsInactive.Include) == null)
-                        errors.Add("Forest scene has no ViewmodelMotionController; first-person arms/flashlight would remain static.");
+                        errors.Add("Forest scene has no ViewmodelMotionController; first-person skeletal motion would remain static.");
                     if (UnityEngine.Object.FindFirstObjectByType<AtmosphereController>(FindObjectsInactive.Include) == null)
                         errors.Add("Forest scene has no adaptive AtmosphereController.");
                     if (UnityEngine.Object.FindFirstObjectByType<WhiteEyesHallucination>(FindObjectsInactive.Include) == null)
@@ -88,7 +117,17 @@ namespace FallenForest.EditorTools
 
                     FlashlightController flashlight = UnityEngine.Object.FindFirstObjectByType<FlashlightController>(FindObjectsInactive.Include);
                     if (flashlight == null)
+                    {
                         errors.Add("Forest scene has no FlashlightController.");
+                    }
+                    else
+                    {
+                        SerializedObject flashSo = new(flashlight);
+                        if (flashSo.FindProperty("visualRoot")?.objectReferenceValue == null)
+                            errors.Add("FlashlightController is not wired to the held flashlight visual; pickup visibility state would be wrong.");
+                        if (flashSo.FindProperty("rayOrigin")?.objectReferenceValue == null)
+                            errors.Add("FlashlightController has no physical ray origin.");
+                    }
 
                     ForestScatterer scatterer = UnityEngine.Object.FindFirstObjectByType<ForestScatterer>(FindObjectsInactive.Include);
                     if (scatterer == null)
@@ -105,18 +144,40 @@ namespace FallenForest.EditorTools
                         }
                         else
                         {
-                            bool hasCanonical = false;
+                            bool hasBlackSpruce = false;
+                            bool hasLowPoly = false;
                             for (int i = 0; i < trees.arraySize; i++)
                             {
                                 GameObject tree = trees.GetArrayElementAtIndex(i).objectReferenceValue as GameObject;
                                 if (tree == null) continue;
                                 string path = AssetDatabase.GetAssetPath(tree);
-                                if (path == BlackSpruce) hasCanonical = true;
+                                if (path == BlackSpruce) hasBlackSpruce = true;
+                                if (path.StartsWith(LowPolyDir, StringComparison.OrdinalIgnoreCase)) hasLowPoly = true;
                                 if (path.IndexOf("Generated/SceneBootstrap", StringComparison.OrdinalIgnoreCase) >= 0)
                                     errors.Add("ForestScatterer still references bootstrap tree geometry: " + path);
                             }
-                            if (!hasCanonical)
+                            if (!hasBlackSpruce)
                                 errors.Add("ForestScatterer is not wired to the canonical Black Spruce user prefab.");
+                            if (!hasLowPoly)
+                                errors.Add("ForestScatterer is not wired to the extracted low-poly user tree pack.");
+                        }
+                    }
+
+                    ForestPropScatterer props = UnityEngine.Object.FindFirstObjectByType<ForestPropScatterer>(FindObjectsInactive.Include);
+                    string lowPolyRockPath = FindGeneratedPrefabPath("LowPolyRock_");
+                    if (!string.IsNullOrEmpty(lowPolyRockPath))
+                    {
+                        RequireTexturedPrefab(lowPolyRockPath, "low-poly user rock", errors);
+                        if (props == null)
+                        {
+                            errors.Add("Low-poly rock prefabs exist but the Forest scene has no ForestPropScatterer.");
+                        }
+                        else
+                        {
+                            SerializedObject propSo = new(props);
+                            SerializedProperty array = propSo.FindProperty("propPrefabs");
+                            if (array == null || array.arraySize == 0)
+                                errors.Add("ForestPropScatterer exists but has no user rock prefabs wired.");
                         }
                     }
                 }
@@ -129,13 +190,26 @@ namespace FallenForest.EditorTools
 
             if (errors.Count == 0)
             {
-                Debug.Log("Fallen Forest: runtime readiness PASSED (materials, user trees, terrain, motion, adaptive night, White Eyes).");
+                Debug.Log("Fallen Forest: runtime readiness PASSED (all user models, textures, trees/props, creature motion, adaptive night, White Eyes).");
                 return;
             }
 
             string message = "Fallen Forest runtime readiness failed:\n - " + string.Join("\n - ", errors);
             Debug.LogError(message);
             throw new BuildFailedException(message);
+        }
+
+        private static string FindGeneratedPrefabPath(string prefix)
+        {
+            if (!AssetDatabase.IsValidFolder(LowPolyDir)) return null;
+            foreach (string guid in AssetDatabase.FindAssets("t:GameObject", new[] { LowPolyDir }))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (!path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase)) continue;
+                if (Path.GetFileNameWithoutExtension(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    return path;
+            }
+            return null;
         }
 
         private static void RequireTexturedPrefab(string path, string label, List<string> errors)
