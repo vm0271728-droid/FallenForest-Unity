@@ -24,6 +24,11 @@ namespace FallenForest.World
         [SerializeField, Min(.25f)] private float minimumTreeSpacing = 1.75f;
         [SerializeField, Min(1)] private int placementAttemptsPerTree = 9;
 
+        [Header("Grass rendering")]
+        [SerializeField] private bool batchGrassMeshes = true;
+        [SerializeField, Min(8f)] private float grassChunkSize = 30f;
+        [SerializeField] private bool keepIndividualGrassInEditor;
+
         [Header("Map")]
         [SerializeField] private float edgePadding = 14f;
         [SerializeField] private float clearStartRadius = 9f;
@@ -116,21 +121,42 @@ namespace FallenForest.World
             if (createdTrees < treeCount)
                 Debug.LogWarning($"Fallen Forest: generated {createdTrees}/{treeCount} trees. Reduce spacing or increase placement attempts if intentional density is not reached.");
 
-            if (grassPrefabs != null && grassPrefabs.Length > 0)
+            GenerateGrass(terrainOrigin, terrainSize);
+            Random.state = old;
+        }
+
+        private void GenerateGrass(Vector3 terrainOrigin, Vector3 terrainSize)
+        {
+            if (grassPrefabs == null || grassPrefabs.Length == 0 || grassClumpCount <= 0)
+                return;
+
+            bool useBatching = batchGrassMeshes && (Application.isPlaying || !keepIndividualGrassInEditor);
+            GrassMeshBatcher batcher = useBatching ? new GrassMeshBatcher(grassChunkSize, generatedRoot) : null;
+            int fallbackObjects = 0;
+
+            for (int i = 0; i < grassClumpCount; i++)
             {
-                for (int i = 0; i < grassClumpCount; i++)
-                {
-                    Vector3 p = RandomPoint(terrainOrigin, terrainSize);
-                    p.y = terrain.SampleHeight(p) + terrainOrigin.y;
-                    GameObject prefab = grassPrefabs[Random.Range(0, grassPrefabs.Length)];
-                    if (prefab == null) continue;
-                    GameObject go = Instantiate(prefab, p, Quaternion.Euler(0f, Random.Range(0f, 360f), 0f), generatedRoot);
-                    go.transform.localScale *= Random.Range(grassScaleRange.x, grassScaleRange.y);
-                    spawned.Add(go);
-                }
+                Vector3 p = RandomPoint(terrainOrigin, terrainSize);
+                p.y = terrain.SampleHeight(p) + terrainOrigin.y;
+                GameObject prefab = grassPrefabs[Random.Range(0, grassPrefabs.Length)];
+                if (prefab == null) continue;
+
+                Quaternion rotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
+                float scale = Random.Range(grassScaleRange.x, grassScaleRange.y);
+                bool batched = batcher != null && batcher.Add(prefab, p, rotation, scale);
+                if (batched) continue;
+
+                GameObject go = Instantiate(prefab, p, rotation, generatedRoot);
+                go.transform.localScale *= scale;
+                spawned.Add(go);
+                fallbackObjects++;
             }
 
-            Random.state = old;
+            if (batcher != null)
+            {
+                int chunks = batcher.Build();
+                Debug.Log($"Fallen Forest: grass batched into {chunks} renderer chunks; {fallbackObjects} unsupported clumps used GameObject fallback.");
+            }
         }
 
         private bool HasSpacing(Vector2 p)
