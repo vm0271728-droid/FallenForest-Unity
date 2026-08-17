@@ -28,18 +28,29 @@ jobs:
           fetch-depth: 1
           lfs: false
 
-      - name: Download and verify canonical user archive
+      - name: Download and verify canonical user archives
         shell: bash
         run: |
           set -euo pipefail
           python3 -m pip install --disable-pip-version-check --quiet 'gdown>=5.2,<6'
+
           python3 -m gdown 'https://drive.google.com/uc?id=1W9RzSrC8SWn1BJCa_i0OU2Wkk0L0LQe6' -O all-needed.zip
           test -f all-needed.zip
           test "$(stat -c %s all-needed.zip)" = '85825470'
           echo '0848ea17b01f750747a37e3af9b0e74723efcba58a253c20e798e30b41a5e9d8  all-needed.zip' | sha256sum -c -
           python3 Tools/import_all_needed_archive.py all-needed.zip
+
+          python3 -m gdown 'https://drive.google.com/uc?id=11nhh2Q0djgdQm653EQkWJjqSpdJ9SEFk' -O trees.zip
+          test -f trees.zip
+          test "$(stat -c %s trees.zip)" = '198111913'
+          echo '13cc391a560ebddae59d3940a5f17a02083fd1f1f487fdeaba8dea5401df3363  trees.zip' | sha256sum -c -
+          python3 Tools/import_tree_archive.py trees.zip
+
           test ! -f Assets/FallenForest/Audio/Screamers/amazing-grace-analog-horror.mp3
-          echo 'Canonical user archive imported and integrity-checked.'
+          test -f 'Assets/FallenForest/Art/Vegetation/UserTrees/BlackSpruce/Source/Picea mariana HD_Arctic mat 100_LOD0.fbx'
+          test -f 'Assets/FallenForest/Art/Vegetation/UserTrees/BlackSpruce/Source/zzz_LODs/LOD4/Picea mariana HD_Arctic mat 100_LOD4.fbx'
+          test -f Assets/FallenForest/Art/Vegetation/UserTrees/DeadFirs/Source/firs.obj
+          echo 'Canonical user archives imported and integrity-checked.'
 
       - name: Fetch vetted CC0 audio
         shell: bash
