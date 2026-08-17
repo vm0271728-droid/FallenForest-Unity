@@ -10,6 +10,8 @@ namespace FallenForest.World
     /// </summary>
     public sealed class GrassMeshBatcher
     {
+        private static readonly int GrassExclusionEnabled = Shader.PropertyToID("_GrassExclusionEnabled");
+
         private readonly struct BatchKey
         {
             public readonly int x;
@@ -94,6 +96,9 @@ namespace FallenForest.World
         public int Build()
         {
             int built = 0;
+            MaterialPropertyBlock grassProperties = new();
+            grassProperties.SetFloat(GrassExclusionEnabled, 1f);
+
             foreach (KeyValuePair<BatchKey, List<CombineInstance>> pair in batches)
             {
                 if (pair.Value.Count == 0 || pair.Key.material == null) continue;
@@ -113,6 +118,7 @@ namespace FallenForest.World
                 mesh.UploadMeshData(true);
                 filter.sharedMesh = mesh;
                 renderer.sharedMaterial = pair.Key.material;
+                renderer.SetPropertyBlock(grassProperties);
                 renderer.shadowCastingMode = ShadowCastingMode.On;
                 renderer.receiveShadows = true;
                 renderer.lightProbeUsage = LightProbeUsage.BlendProbes;

@@ -8,9 +8,9 @@ using UnityEngine;
 namespace FallenForest.Documents
 {
     /// <summary>
-    /// Deterministically chooses ten valid ground positions. Hand-authored points are supported,
-    /// but the final forest can generate a much larger candidate pool from Terrain at runtime so
-    /// documents genuinely move between new games without ever landing inside trees or steep slopes.
+    /// Deterministically chooses ten valid ground positions across the forest. Documents are kept
+    /// off marked trails, can sit deep in dense grass, and locally clear that grass for readability.
+    /// A separate 45% atmospheric roll may add 4-6 tiny, very dim fireflies above a document.
     /// </summary>
     public sealed class DocumentSpawner : MonoBehaviour
     {
@@ -22,12 +22,20 @@ namespace FallenForest.Documents
         [SerializeField] private Transform startPoint;
         [SerializeField] private int seedOverride;
 
+        [Header("Forest placement")]
+        [SerializeField, Min(0f)] private float trailClearance = 1.15f;
+        [SerializeField, Min(.15f)] private float grassClearRadius = .92f;
+
+        [Header("Optional fireflies")]
+        [SerializeField, Range(0f, 1f)] private float fireflyChance = .45f;
+        [SerializeField] private Vector2Int fireflyCountRange = new(4, 6);
+
         [Header("Runtime candidate generation")]
         [SerializeField] private bool generateRuntimeCandidates = true;
         [SerializeField] private Terrain terrain;
         [SerializeField] private ForestSpatialIndex forestIndex;
-        [SerializeField, Min(20)] private int runtimeCandidateCount = 140;
-        [SerializeField, Min(100)] private int maximumSamplingAttempts = 1800;
+        [SerializeField, Min(20)] private int runtimeCandidateCount = 160;
+        [SerializeField, Min(100)] private int maximumSamplingAttempts = 2200;
         [SerializeField] private float terrainEdgePadding = 18f;
         [SerializeField, Range(0f, 60f)] private float maximumSlope = 24f;
         [SerializeField] private float treeClearance = 1.35f;
@@ -76,6 +84,8 @@ namespace FallenForest.Documents
                     }
                 }
                 if (tooClose) continue;
+                if (TrailZone.IsNearAnyTrail(candidate.position, trailClearance))
+                    continue;
 
                 chosenPositions.Add(candidate.position);
                 int slot = selected++;
@@ -85,6 +95,21 @@ namespace FallenForest.Documents
                 DocumentPickup instance = Instantiate(documentPrefab, candidate.position, candidate.rotation, transform);
                 instance.name = $"Document_{slot + 1:00}";
                 instance.Configure(slot);
+
+                GrassExclusionEmitter clearing = instance.gameObject.AddComponent<GrassExclusionEmitter>();
+                clearing.Configure(grassClearRadius);
+
+                // The 45% roll belongs to the firefly decoration, never to the document itself.
+                // A document always exists if its slot is active and uncollected.
+                var fxRng = new System.Random(seed ^ unchecked((slot + 1) * 486187739));
+                if (fxRng.NextDouble() < fireflyChance)
+                {
+                    int minCount = Mathf.Clamp(fireflyCountRange.x, 4, 6);
+                    int maxCount = Mathf.Clamp(fireflyCountRange.y, minCount, 6);
+                    int flyCount = fxRng.Next(minCount, maxCount + 1);
+                    DocumentFireflies fireflies = instance.gameObject.AddComponent<DocumentFireflies>();
+                    fireflies.Configure(seed ^ unchecked((slot + 17) * 16777619), flyCount);
+                }
             }
 
             if (selected < count)
@@ -101,6 +126,8 @@ namespace FallenForest.Documents
                 Vector3 position = point.transform.position;
                 if (startPoint != null && Vector3.Distance(Flat(position), Flat(startPoint.position)) < minimumFromStart)
                     continue;
+                if (TrailZone.IsNearAnyTrail(position, trailClearance))
+                    continue;
                 candidates.Add(new Candidate(position, point.transform.rotation));
             }
 
@@ -115,7 +142,7 @@ namespace FallenForest.Documents
             Vector3 size = terrain.terrainData.size;
             int accepted = 0;
             int attempts = 0;
-            int target = Mathf.Max(runtimeCandidateCount, count * 8);
+            int target = Mathf.Max(runtimeCandidateCount, count * 10);
 
             while (accepted < target && attempts++ < maximumSamplingAttempts)
             {
@@ -125,6 +152,8 @@ namespace FallenForest.Documents
                 position.y = terrain.SampleHeight(position) + origin.y + .035f;
 
                 if (startPoint != null && Vector3.Distance(Flat(position), Flat(startPoint.position)) < minimumFromStart)
+                    continue;
+                if (TrailZone.IsNearAnyTrail(position, trailClearance))
                     continue;
 
                 Vector3 normalized = new(
@@ -145,6 +174,7 @@ namespace FallenForest.Documents
                     Collider col = overlaps[i];
                     if (col == null || col is TerrainCollider) continue;
                     if (col.GetComponentInParent<PlayerMotor>() != null) continue;
+                    if (col.GetComponentInParent<TrailZone>() != null) continue;
                     blocked = true;
                     break;
                 }

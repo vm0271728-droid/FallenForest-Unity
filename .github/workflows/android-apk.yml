@@ -9,6 +9,7 @@ on:
       - 'Assets/**'
       - 'Packages/**'
       - 'ProjectSettings/**'
+      - 'ThirdParty/UserUploads/**'
       - 'Tools/**'
       - '.github/workflows/android-apk.yml'
 
@@ -28,6 +29,52 @@ jobs:
         with:
           fetch-depth: 0
           lfs: true
+
+      - name: Import and verify canonical user release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archive=''
+          for candidate in \
+            'ThirdParty/UserUploads/all-needed.zip' \
+            'ThirdParty/UserUploads/все нужное.zip'; do
+            if [ -f "$candidate" ]; then
+              archive="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$archive" ] && [ -d ThirdParty/UserUploads ]; then
+            archive="$(find ThirdParty/UserUploads -maxdepth 1 -type f -iname '*.zip' -size +50M -print -quit 2>/dev/null || true)"
+          fi
+
+          test -n "$archive" && test -f "$archive" || {
+            echo 'MISSING CANONICAL ARCHIVE: put the single user package in ThirdParty/UserUploads/all-needed.zip' >&2
+            echo 'Expected the ~85.8 MB archive containing grass, arms, flashlight, documents, pickup, Locust, Boiled One, video and screamers.' >&2
+            exit 3
+          }
+
+          echo "Canonical archive: $archive"
+          python3 Tools/import_all_needed_archive.py "$archive"
+
+          require_file() { test -f "$1" || { echo "MISSING AFTER IMPORT: $1" >&2; exit 4; }; }
+          require_file Assets/FallenForest/Art/Vegetation/UserGrass/Source/Grass.fbx
+          require_file Assets/FallenForest/Art/Viewmodel/Arms/Source/fpsarms.fbx
+          require_file Assets/FallenForest/Art/Viewmodel/Flashlight/Source/flashlightfbx.fbx
+          require_file Assets/FallenForest/Art/Documents/UserDocument/Source/document_file_folder.obj
+          require_file 'Assets/FallenForest/Art/Vehicles/Pickup/Source/Pickup Afghanistan.fbx'
+          require_file 'Assets/FallenForest/Art/Models/DoctorNowhere/Locust/Source/T_O_E Locust - By Doumty.fbx'
+          require_file Assets/FallenForest/Art/Models/DoctorNowhere/Boiled/Source/BoiledOne.fbx
+          require_file Assets/FallenForest/Audio/Screamers/jakes-screamer.mp3
+          require_file Assets/FallenForest/Audio/Screamers/the-screamer-shared-between-mallie-and-jenny.mp3
+          require_file Assets/FallenForest/Video/boiled_one_jumpscare.mp4
+
+          if [ -f Assets/FallenForest/Audio/Screamers/amazing-grace-analog-horror.mp3 ]; then
+            echo 'FORBIDDEN FILE PRESENT AFTER IMPORT: amazing-grace-analog-horror.mp3' >&2
+            exit 5
+          fi
+          echo 'Canonical user release archive validation passed before Unity installation.'
 
       - name: Fetch vetted CC0 menu and forest ambience
         run: python3 Tools/fetch_cc0_audio.py
@@ -62,8 +109,6 @@ jobs:
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y unityhub xvfb
 
-          # Hub 3.20+ installs the real executable and Unity.Licensing.Client under /usr/lib/unityhub.
-          # /usr/bin/unityhub is only the launcher entry and causes buildalon licensing to search /usr/bin/**.
           if [ -x /usr/lib/unityhub/unityhub ]; then
             hub=/usr/lib/unityhub/unityhub
           elif [ -x /opt/unityhub/unityhub ]; then
@@ -83,9 +128,6 @@ jobs:
           echo "UNITY_HUB_PATH=$hub" >> "$GITHUB_ENV"
           echo "Unity Hub installed at: $hub"
           echo "Unity Licensing Client: $licensing_client"
-
-          # Unity's current Linux Hub CLI syntax is `unityhub --headless ...`.
-          # Hub is Electron-based, so run its headless CLI under Xvfb on CI.
           xvfb-run -a "$hub" --headless help --errors | head -80
 
       - name: Install Unity 6.0.76f1 and Android modules with Hub CLI
@@ -94,17 +136,13 @@ jobs:
           set -euo pipefail
           install_root="$HOME/Unity/Hub/Editor"
           mkdir -p "$install_root"
-
           xvfb-run -a "$UNITY_HUB_PATH" --headless install-path -s "$install_root" --errors
-
-          # Install Android as the parent module and include all child modules non-interactively.
           xvfb-run -a "$UNITY_HUB_PATH" --headless install \
             --version 6000.0.76f1 \
             --changeset 6f7f9e1c9e8a \
             --module android \
             --childModules \
             --errors
-
           xvfb-run -a "$UNITY_HUB_PATH" --headless editors -i --errors || true
 
           editor="$install_root/6000.0.76f1/Editor/Unity"
@@ -154,30 +192,6 @@ jobs:
             -quit \
             -projectPath "$GITHUB_WORKSPACE" \
             -logFile -
-
-      - name: Verify final release media and creature models
-        shell: bash
-        run: |
-          set -euo pipefail
-          missing=0
-          require_file() { if [ ! -f "$1" ]; then echo "MISSING FILE: $1"; missing=1; fi; }
-          require_model() {
-            local dir="$1"
-            if [ ! -d "$dir" ]; then echo "MISSING MODEL DIRECTORY: $dir"; missing=1; return; fi
-            if ! find "$dir" -type f \( -iname '*.fbx' -o -iname '*.obj' -o -iname '*.gltf' -o -iname '*.glb' \) -print -quit | grep -q .; then
-              echo "MISSING 3D MODEL FILE: $dir"; missing=1
-            fi
-          }
-          require_file Assets/FallenForest/Audio/Menu/creepy_forest_menu.ogg
-          require_file Assets/FallenForest/Audio/Ambience/forest_ambience_cc0.mp3
-          require_file Assets/FallenForest/Audio/Ambience/ambient_horror_cc0.ogg
-          require_file Assets/FallenForest/Audio/Screamers/jakes-screamer.mp3
-          require_file Assets/FallenForest/Audio/Screamers/the-screamer-shared-between-mallie-and-jenny.mp3
-          require_file Assets/FallenForest/Video/boiled_one_jumpscare.mp4
-          if [ -f Assets/FallenForest/Audio/Screamers/amazing-grace-analog-horror.mp3 ]; then echo 'FORBIDDEN FILE PRESENT: amazing-grace-analog-horror.mp3'; missing=1; fi
-          require_model Assets/FallenForest/Art/Models/DoctorNowhere/Locust
-          require_model Assets/FallenForest/Art/Models/DoctorNowhere/Boiled
-          exit "$missing"
 
       - name: Cache Unity Library
         uses: actions/cache@v4
