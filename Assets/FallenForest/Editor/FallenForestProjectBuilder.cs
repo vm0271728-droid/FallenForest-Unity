@@ -21,10 +21,14 @@ namespace FallenForest.EditorTools
         {
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
+            // Build exact user-derived prefabs first. This lets the scene assembler consume the
+            // real grass and creature assets instead of its bootstrap geometry wherever possible.
+            FallenForestUserContentIntegrator.IntegrateBeforeSceneAssembly();
+
             // Scenes are source-generated from the real runtime world systems when they have not
-            // been committed yet. This happens before release validation so "missing scenes" is no
-            // longer an artificial blocker; exact media/models remain strictly validated afterward.
+            // been committed yet. Exact media/models remain strictly validated afterward.
             FallenForestSceneAssembler.EnsureRequiredScenesForCI();
+            FallenForestUserContentIntegrator.PatchGeneratedForestScene();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
             FallenForestReleaseValidator.ValidateReleaseOrThrow();
 
