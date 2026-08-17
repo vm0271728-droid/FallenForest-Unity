@@ -41,24 +41,48 @@ jobs:
           test -n "$UNITY_USERNAME" || { echo 'Missing GitHub secret: UNITY_USERNAME'; exit 2; }
           test -n "$UNITY_PASSWORD" || { echo 'Missing GitHub secret: UNITY_PASSWORD'; exit 2; }
 
-      - name: Free runner disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: false
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: false
-          swap-storage: false
+      # Unity's current documentation recommends the standalone Unity CLI for
+      # headless CI workers. This avoids Unity Hub path assumptions on Ubuntu 24.04.
+      - name: Install official Unity CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          unity --version
 
-      - name: Install Unity 6 and Android support
-        id: unity_setup
-        uses: RageAgainstThePixel/unity-setup@v2
-        with:
-          version-file: ProjectSettings/ProjectVersion.txt
-          build-targets: Android
-          cache-installation: true
+      - name: Install Unity 6.0.76f1 and Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          unity install 6000.0.76f1 \
+            -c 6f7f9e1c9e8a \
+            -m android \
+            --cm \
+            --format ndjson
+
+          echo 'Installed editors:'
+          unity editors -i --format json || true
+
+          editor="$(find "$HOME" -type f -path '*/6000.0.76f1/Editor/Unity' -perm -111 -print -quit 2>/dev/null || true)"
+          if [ -z "$editor" ]; then
+            editor="$(find /opt -type f -path '*/6000.0.76f1/Editor/Unity' -perm -111 -print -quit 2>/dev/null || true)"
+          fi
+          if [ -z "$editor" ]; then
+            echo 'Unity 6000.0.76f1 installed, but Editor executable could not be located.' >&2
+            find "$HOME" -maxdepth 7 -type f -name Unity -perm -111 -print 2>/dev/null || true
+            exit 1
+          fi
+          echo "UNITY_EDITOR_PATH=$editor" >> "$GITHUB_ENV"
+          echo "Resolved Unity Editor: $editor"
+
+          android_player="$(dirname "$editor")/Data/PlaybackEngines/AndroidPlayer"
+          test -d "$android_player" || { echo "Android Build Support missing: $android_player" >&2; exit 1; }
+          test -d "$android_player/SDK" || { echo 'Unity Android SDK child module is missing.' >&2; exit 1; }
+          test -d "$android_player/NDK" || { echo 'Unity Android NDK child module is missing.' >&2; exit 1; }
+          test -d "$android_player/OpenJDK" || { echo 'Unity OpenJDK child module is missing.' >&2; exit 1; }
 
       - name: Activate Unity Personal on the cloud runner
         uses: buildalon/activate-unity-license@v2
@@ -72,6 +96,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -x "$UNITY_EDITOR_PATH"
           "$UNITY_EDITOR_PATH" \
             -batchmode \
             -nographics \
