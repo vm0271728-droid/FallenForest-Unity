@@ -81,8 +81,8 @@ jobs:
           success=0
           for attempt in 1 2; do
             echo "Android module installation attempt $attempt"
-            if unity install 6000.0.76f1 \
-              -c 6f7f9e1c9e8a \
+            if unity install-modules \
+              -e 6000.0.76f1 \
               -m android \
               --cm \
               --accept-eula \
