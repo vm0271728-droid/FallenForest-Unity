@@ -19,6 +19,8 @@ namespace FallenForest.Monsters
         [SerializeField, Range(2f, 25f)] private float gazeTriggerAngle = 10f;
         [SerializeField] private float gazeConfirmationTime = .06f;
         [SerializeField] private float gazeMaxDistance = 70f;
+        [SerializeField] private float illuminatedAngleMultiplier = 1.25f;
+        [SerializeField] private float illuminationAssistMemory = .14f;
 
         [Header("Forced encounter")]
         [SerializeField] private float reactionDelay = .08f;
@@ -41,6 +43,7 @@ namespace FallenForest.Monsters
         private bool triggered;
         private float expireAt;
         private float gazeTimer;
+        private float illuminatedUntil;
 
         private void OnEnable() => MonsterRegistry.Boiled.Add(this);
 
@@ -80,8 +83,13 @@ namespace FallenForest.Monsters
             ResolvePlayerReferences();
             TrackHeadVerySlowly();
 
-            if (IsPlayerLookingAtMe(gazeTriggerAngle))
+            bool recentlyIlluminated = Time.unscaledTime <= illuminatedUntil;
+            float allowedAngle = gazeTriggerAngle * (recentlyIlluminated ? illuminatedAngleMultiplier : 1f);
+
+            if (IsPlayerLookingAtMe(allowedAngle))
             {
+                // Even flashlight-assisted detection must survive the confirmation interval. This
+                // prevents a single lit frame or fast camera sweep from stealing controls.
                 gazeTimer += Time.unscaledDeltaTime;
                 if (gazeTimer >= gazeConfirmationTime)
                     TriggerEncounter();
@@ -177,15 +185,14 @@ namespace FallenForest.Monsters
         }
 
         /// <summary>
-        /// Flashlight exposure no longer starts the cinematic by itself. The player must actually
-        /// catch the Boiled One in their view; illumination merely gives a slightly wider gaze cone.
+        /// Flashlight exposure never starts the cinematic by itself. It only briefly widens the
+        /// normal camera-gaze cone; Update still requires direct visibility and the same confirmation
+        /// time before controls are captured.
         /// </summary>
         public void OnIlluminated()
         {
             if (triggered || GameProgress.Instance == null) return;
-            ResolvePlayerReferences();
-            if (IsPlayerLookingAtMe(gazeTriggerAngle * 1.25f))
-                TriggerEncounter();
+            illuminatedUntil = Mathf.Max(illuminatedUntil, Time.unscaledTime + illuminationAssistMemory);
         }
 
         private void TriggerEncounter()
