@@ -1,4 +1,4 @@
-status=running
+status=failure
 target_run_id=32099356449
 trigger_run_id=32099886651
-started_at=2026-08-18T04:38:39Z
+completed_at=2026-08-18T04:38:41Z
