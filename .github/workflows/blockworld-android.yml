@@ -27,7 +27,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore BlockWorld source
+      - name: Restore and patch BlockWorld source
         shell: bash
         run: |
           set -euxo pipefail
@@ -35,6 +35,20 @@ jobs:
           base64 -d "$RUNNER_TEMP/BlockWorld_Source.zip.b64" > "$RUNNER_TEMP/BlockWorld_Source.zip"
           unzip -q "$RUNNER_TEMP/BlockWorld_Source.zip" -d .
           test -f BlockWorld/project.godot
+          python3 - <<'PY'
+          from pathlib import Path
+          main = Path('BlockWorld/scripts/main.gd')
+          text = main.read_text()
+          text = text.replace('var cc:=chunk_queue.pop_front()', 'var cc:Vector2i=chunk_queue.pop_front()')
+          text = text.replace('var cc:=rebuild_queue.pop_front()', 'var cc:Vector2i=rebuild_queue.pop_front()')
+          main.write_text(text)
+          project = Path('BlockWorld/project.godot')
+          p = project.read_text()
+          marker = 'textures/canvas_textures/default_texture_filter=0'
+          if 'textures/vram_compression/import_etc2_astc=true' not in p:
+              p = p.replace(marker, marker + '\ntextures/vram_compression/import_etc2_astc=true')
+          project.write_text(p)
+          PY
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -49,7 +63,7 @@ jobs:
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.1'
+          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.1' 'cmdline-tools;latest' 'cmake;3.10.2.4988404' 'ndk;28.1.13356709'
 
       - name: Download Godot and Android export templates
         shell: bash
@@ -96,7 +110,10 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          "$GODOT_BIN" --headless --editor --path BlockWorld --quit-after 8
+          "$GODOT_BIN" --headless --editor --path BlockWorld --quit-after 8 2>&1 | tee "$RUNNER_TEMP/godot-import.log"
+          if grep -E 'SCRIPT ERROR|Parse Error|Failed to load script' "$RUNNER_TEMP/godot-import.log"; then
+            exit 1
+          fi
 
       - name: Export APK
         shell: bash
@@ -107,7 +124,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p BlockWorld/build
-          "$GODOT_BIN" --headless --path BlockWorld --export-debug Android build/BlockWorld.apk
+          "$GODOT_BIN" --headless --verbose --path BlockWorld --export-debug Android build/BlockWorld.apk
           test -s BlockWorld/build/BlockWorld.apk
 
       - name: Verify APK
