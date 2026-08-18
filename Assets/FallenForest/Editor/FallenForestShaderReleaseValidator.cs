@@ -37,8 +37,9 @@ namespace FallenForest.EditorTools
                 ShaderMessage[] messages = ShaderUtil.GetShaderMessages(shader);
                 foreach (ShaderMessage message in messages)
                 {
-                    if (message.severity != ShaderCompilerMessageSeverity.Error) continue;
-                    string platform = string.IsNullOrEmpty(message.platform) ? "unknown-platform" : message.platform;
+                    if (message.severity != UnityEditor.Rendering.ShaderCompilerMessageSeverity.Error) continue;
+                    string platform = message.platform.ToString();
+                    if (string.IsNullOrEmpty(platform)) platform = "unknown-platform";
                     errors.Add($"{path} [{platform}] line {message.line}: {message.message}");
                 }
 
