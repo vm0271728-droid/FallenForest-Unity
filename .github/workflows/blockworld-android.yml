@@ -19,7 +19,7 @@ permissions:
 jobs:
   build-android:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       GODOT_VERSION: '4.6.3'
       GODOT_RELEASE: '4.6.3-stable'
@@ -64,11 +64,11 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android packages
+      - name: Install Android packages and emulator image
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.1' 'cmdline-tools;latest' 'cmake;3.10.2.4988404' 'ndk;28.1.13356709'
+          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.1' 'cmdline-tools;latest' 'cmake;3.10.2.4988404' 'ndk;28.1.13356709' 'emulator' 'system-images;android-35;google_apis;x86_64'
 
       - name: Download Godot and Android export templates
         shell: bash
@@ -131,6 +131,30 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/apk-badging.txt
           sha256sum BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/BlockWorld.apk.sha256
 
+      - name: Install and launch APK in Android emulator
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+          echo no | avdmanager create avd --force --name blockworld-ci --package 'system-images;android-35;google_apis;x86_64' --device 'pixel_6'
+          adb start-server
+          "$ANDROID_HOME/emulator/emulator" -avd blockworld-ci -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          BOOTED=0
+          for i in $(seq 1 120); do
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then BOOTED=1; break; fi
+            sleep 2
+          done
+          if [ "$BOOTED" != "1" ]; then cat "$RUNNER_TEMP/emulator.log"; exit 1; fi
+          adb install -r BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/install-result.txt
+          adb logcat -c
+          adb shell monkey -p com.example.blockworld -c android.intent.category.LAUNCHER 1
+          sleep 10
+          PID="$(adb shell pidof com.example.blockworld | tr -d '\r')"
+          echo "PID=$PID" | tee BlockWorld/build/runtime-smoke.txt
+          test -n "$PID"
+          adb logcat -d > BlockWorld/build/runtime-logcat.txt
+          if grep -E 'FATAL EXCEPTION|ANR in com\.example\.blockworld' BlockWorld/build/runtime-logcat.txt; then exit 1; fi
+
       - name: Package source
         shell: bash
         run: |
@@ -148,4 +172,7 @@ jobs:
             BlockWorld/build/BlockWorld.apk
             BlockWorld/build/BlockWorld.apk.sha256
             BlockWorld/build/apk-badging.txt
+            BlockWorld/build/install-result.txt
+            BlockWorld/build/runtime-smoke.txt
+            BlockWorld/build/runtime-logcat.txt
             BlockWorld/build/BlockWorld_Source.zip
