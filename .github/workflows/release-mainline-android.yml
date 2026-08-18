@@ -228,23 +228,54 @@ jobs:
       - name: Compile and import exact release project
         shell: bash
         run: |
-          set -o pipefail
+          set -uo pipefail
+          log="$RUNNER_TEMP/unity-release-import.log"
+
           set +e
           "$UNITY_EDITOR_PATH" \
             -batchmode \
             -nographics \
             -quit \
             -projectPath "$GITHUB_WORKSPACE" \
-            -logFile "$RUNNER_TEMP/unity-release-import.log"
-          code=$?
+            -logFile "$log"
+          rc=$?
           set -e
-          cat "$RUNNER_TEMP/unity-release-import.log" || true
-          exit "$code"
+
+          cat "$log" || true
+
+          if grep -Eq 'error CS[0-9]{4}' "$log"; then
+            echo 'C# compiler error detected in canonical release import.' >&2
+            exit 1
+          fi
+          if grep -Fq 'Aborting batchmode due to failure' "$log"; then
+            echo 'Unity explicitly aborted batchmode due to a project/import failure.' >&2
+            [ "$rc" -ne 0 ] && exit "$rc"
+            exit 1
+          fi
+
+          if [ "$rc" -eq 0 ]; then
+            echo 'Canonical release compile/import completed cleanly.'
+            exit 0
+          fi
+
+          if [ "$rc" -eq 139 ] \
+            && grep -Fq 'Batchmode quit successfully invoked - shutting down!' "$log" \
+            && grep -Fq 'Caught fatal signal - signo:11' "$log"; then
+            echo '::warning::Unity 6 Linux Editor hit a verified SIGSEGV during teardown after successful batchmode quit; compile/import is accepted.'
+            exit 0
+          fi
+
+          echo "Canonical release compile/import failed with exit code $rc." >&2
+          exit "$rc"
 
       - name: Build real development-signed APK
         shell: bash
         run: |
-          set -o pipefail
+          set -uo pipefail
+          apk='Builds/Android/Fallen_Forest_1.0.0.apk'
+          log="$RUNNER_TEMP/unity-release-build.log"
+          rm -f "$apk"
+
           set +e
           "$UNITY_EDITOR_PATH" \
             -batchmode \
@@ -252,11 +283,49 @@ jobs:
             -quit \
             -projectPath "$GITHUB_WORKSPACE" \
             -executeMethod FallenForest.EditorTools.FallenForestProjectBuilder.CIBuildAndroid \
-            -logFile "$RUNNER_TEMP/unity-release-build.log"
-          code=$?
+            -logFile "$log"
+          rc=$?
           set -e
-          cat "$RUNNER_TEMP/unity-release-build.log" || true
-          exit "$code"
+
+          cat "$log" || true
+
+          if grep -Eq 'error CS[0-9]{4}' "$log"; then
+            echo 'C# compiler error detected during canonical APK build.' >&2
+            exit 1
+          fi
+          if grep -Fq 'Aborting batchmode due to failure' "$log"; then
+            echo 'Unity explicitly aborted the APK build.' >&2
+            [ "$rc" -ne 0 ] && exit "$rc"
+            exit 1
+          fi
+          if [ ! -s "$apk" ]; then
+            echo "APK is missing or empty after Unity build: $apk" >&2
+            [ "$rc" -ne 0 ] && exit "$rc"
+            exit 1
+          fi
+          if ! grep -Fq 'Fallen Forest APK built:' "$log"; then
+            echo 'Unity did not emit the successful Fallen Forest build marker.' >&2
+            exit 1
+          fi
+          unzip -tqq "$apk" || {
+            echo 'APK ZIP structure validation failed.' >&2
+            exit 1
+          }
+
+          if [ "$rc" -eq 0 ]; then
+            echo 'Canonical Unity Android build completed cleanly.'
+            exit 0
+          fi
+
+          if [ "$rc" -eq 139 ] \
+            && grep -Fq 'Batchmode quit successfully invoked - shutting down!' "$log" \
+            && grep -Fq 'Caught fatal signal - signo:11' "$log"; then
+            echo '::warning::Unity 6 Linux Editor hit a verified SIGSEGV during teardown after a validated successful APK build; accepting the artifact.'
+            exit 0
+          fi
+
+          echo "Unity returned exit code $rc after producing the APK, but it was not the verified post-success teardown SIGSEGV." >&2
+          exit "$rc"
 
       - name: Verify produced APK
         if: success()
@@ -265,6 +334,7 @@ jobs:
           set -euo pipefail
           apk='Builds/Android/Fallen_Forest_1.0.0.apk'
           test -s "$apk"
+          unzip -tqq "$apk"
           ls -lh "$apk"
           sha256sum "$apk"
 
