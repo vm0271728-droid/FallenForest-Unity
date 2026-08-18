@@ -1,0 +1,134 @@
+name: BlockWorld Android APK
+
+on:
+  push:
+    branches: [blockworld-godot-build]
+    paths:
+      - 'BlockWorld_CI_Source.part*'
+      - '.github/workflows/blockworld-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GODOT_VERSION: '4.6.3'
+      GODOT_RELEASE: '4.6.3-stable'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore BlockWorld source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat BlockWorld_CI_Source.part* > "$RUNNER_TEMP/BlockWorld_Source.zip.b64"
+          base64 -d "$RUNNER_TEMP/BlockWorld_Source.zip.b64" > "$RUNNER_TEMP/BlockWorld_Source.zip"
+          unzip -q "$RUNNER_TEMP/BlockWorld_Source.zip" -d .
+          test -f BlockWorld/project.godot
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.1'
+
+      - name: Download Godot and Android export templates
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/godot" "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          BASE="https://github.com/godotengine/godot-builds/releases/download/${GODOT_RELEASE}"
+          curl -L --fail --retry 5 --retry-delay 3 \
+            -o "$RUNNER_TEMP/godot/editor.zip" \
+            "$BASE/Godot_v${GODOT_RELEASE}_linux.x86_64.zip"
+          curl -L --fail --retry 5 --retry-delay 3 \
+            -o "$RUNNER_TEMP/godot/templates.tpz" \
+            "$BASE/Godot_v${GODOT_RELEASE}_export_templates.tpz"
+          unzip -q "$RUNNER_TEMP/godot/editor.zip" -d "$RUNNER_TEMP/godot/editor"
+          GODOT_BIN="$(find "$RUNNER_TEMP/godot/editor" -maxdepth 2 -type f -name 'Godot_v*-stable_linux.x86_64' | head -n1)"
+          chmod +x "$GODOT_BIN"
+          echo "GODOT_BIN=$GODOT_BIN" >> "$GITHUB_ENV"
+          unzip -q "$RUNNER_TEMP/godot/templates.tpz" -d "$RUNNER_TEMP/godot/template_unpack"
+          cp -a "$RUNNER_TEMP/godot/template_unpack/templates/." "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
+          "$GODOT_BIN" --version
+          test -f "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_debug.apk"
+
+      - name: Configure Godot Android paths and debug keystore
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$HOME/.config/godot" "$HOME/.android"
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          EOF
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -alias androiddebugkey -keypass android \
+              -dname 'CN=Android Debug,O=Android,C=US' \
+              -keyalg RSA -keysize 2048 -validity 10000
+          fi
+
+      - name: Headless import and parser check
+        shell: bash
+        run: |
+          set -euxo pipefail
+          "$GODOT_BIN" --headless --editor --path BlockWorld --quit-after 8
+
+      - name: Export APK
+        shell: bash
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: /home/runner/.android/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+        run: |
+          set -euxo pipefail
+          mkdir -p BlockWorld/build
+          "$GODOT_BIN" --headless --path BlockWorld --export-debug Android build/BlockWorld.apk
+          test -s BlockWorld/build/BlockWorld.apk
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          unzip -t BlockWorld/build/BlockWorld.apk >/dev/null
+          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose BlockWorld/build/BlockWorld.apk
+          "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/apk-badging.txt
+          sha256sum BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/BlockWorld.apk.sha256
+
+      - name: Package source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf BlockWorld/.godot BlockWorld/build/BlockWorld_Source.zip
+          (cd BlockWorld && zip -qr build/BlockWorld_Source.zip . -x 'build/BlockWorld_Source.zip')
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlockWorld-Android
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            BlockWorld/build/BlockWorld.apk
+            BlockWorld/build/BlockWorld.apk.sha256
+            BlockWorld/build/apk-badging.txt
+            BlockWorld/build/BlockWorld_Source.zip
