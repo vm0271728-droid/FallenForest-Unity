@@ -6,12 +6,11 @@ on:
     paths:
       - 'BlockWorld_CI_Source.part*'
       - '.github/workflows/blockworld-android.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'BlockWorld_CI_Source.part*'
-      - '.github/workflows/blockworld-android.yml'
   workflow_dispatch:
+
+concurrency:
+  group: blockworld-android-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -27,42 +26,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore and patch BlockWorld source
+      - name: Restore BlockWorld source
         shell: bash
         run: |
           set -euxo pipefail
           cat BlockWorld_CI_Source.part* > "$RUNNER_TEMP/BlockWorld_Source.zip.b64"
           base64 -d "$RUNNER_TEMP/BlockWorld_Source.zip.b64" > "$RUNNER_TEMP/BlockWorld_Source.zip"
-          unzip -q "$RUNNER_TEMP/BlockWorld_Source.zip" -d .
+          unzip -q "$RUNNER_TEMP/BlockWorld_Source.zip" -d BlockWorld
           test -f BlockWorld/project.godot
+          grep -q 'window/handheld/orientation=0' BlockWorld/project.godot
+          ! grep -q 'Break a tree' BlockWorld/scripts/main.gd
           python3 - <<'PY'
           from pathlib import Path
-          main = Path('BlockWorld/scripts/main.gd')
-          text = main.read_text()
-          text = text.replace('var cc:=chunk_queue.pop_front()', 'var cc:Vector2i=chunk_queue.pop_front()')
-          text = text.replace('var cc:=rebuild_queue.pop_front()', 'var cc:Vector2i=rebuild_queue.pop_front()')
-          main.write_text(text)
-
-          chunk = Path('BlockWorld/scripts/chunk.gd')
-          c = chunk.read_text()
-          c = c.replace('var local_n := Vector3i(x,y,z) + DIRS[f]', 'var local_n: Vector3i = Vector3i(x,y,z) + Vector3i(DIRS[f])')
-          c = c.replace('var gp := Vector3i(coord.x*SIZE+x, y, coord.y*SIZE+z) + DIRS[f]', 'var gp: Vector3i = Vector3i(coord.x*SIZE+x, y, coord.y*SIZE+z) + Vector3i(DIRS[f])')
-          chunk.write_text(c)
-
-          project = Path('BlockWorld/project.godot')
-          p = project.read_text()
+          p = Path('BlockWorld/project.godot')
+          s = p.read_text()
           marker = 'textures/canvas_textures/default_texture_filter=0'
-          if 'textures/vram_compression/import_etc2_astc=true' not in p:
-              p = p.replace(marker, marker + '\ntextures/vram_compression/import_etc2_astc=true')
-          project.write_text(p)
-
+          if 'textures/vram_compression/import_etc2_astc=true' not in s:
+              s = s.replace(marker, marker + '\ntextures/vram_compression/import_etc2_astc=true')
+          p.write_text(s)
           preset = Path('BlockWorld/export_presets.cfg')
           e = preset.read_text().replace('architectures/x86_64=false', 'architectures/x86_64=true')
           preset.write_text(e)
           PY
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -91,9 +79,8 @@ jobs:
           unzip -q "$RUNNER_TEMP/godot/templates.tpz" -d "$RUNNER_TEMP/godot/template_unpack"
           cp -a "$RUNNER_TEMP/godot/template_unpack/templates/." "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
           "$GODOT_BIN" --version
-          test -f "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_debug.apk"
 
-      - name: Configure Godot Android paths and debug keystore
+      - name: Configure Android export
         shell: bash
         run: |
           set -euxo pipefail
@@ -106,39 +93,33 @@ jobs:
           export/android/java_sdk_path = "$JAVA_HOME"
           EOF
           if [ ! -f "$HOME/.android/debug.keystore" ]; then
-            keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname 'CN=Android Debug,O=Android,C=US' -keyalg RSA -keysize 2048 -validity 10000
+            keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname 'CN=Android Test,O=BlockWorld,C=US' -keyalg RSA -keysize 2048 -validity 10000
           fi
 
-      - name: Headless import and parser check
+      - name: Strict parser check
         shell: bash
         run: |
           set -euxo pipefail
           "$GODOT_BIN" --headless --editor --path BlockWorld --quit-after 8 2>&1 | tee "$RUNNER_TEMP/godot-import.log"
           if grep -E 'SCRIPT ERROR|Parse Error|Failed to load script' "$RUNNER_TEMP/godot-import.log"; then exit 1; fi
 
-      - name: Export APK
+      - name: Export release smoke APK
         shell: bash
         env:
-          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: /home/runner/.android/debug.keystore
-          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
-          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: /home/runner/.android/debug.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
         run: |
           set -euxo pipefail
           mkdir -p BlockWorld/build
-          "$GODOT_BIN" --headless --verbose --path BlockWorld --export-debug Android build/BlockWorld.apk
-          test -s BlockWorld/build/BlockWorld.apk
+          "$GODOT_BIN" --headless --path BlockWorld --export-release Android build/BlockWorld-smoke.apk
+          test -s BlockWorld/build/BlockWorld-smoke.apk
+          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose BlockWorld/build/BlockWorld-smoke.apk
+          "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging BlockWorld/build/BlockWorld-smoke.apk | tee BlockWorld/build/smoke-badging.txt
+          grep -q "native-code:.*'x86_64'" BlockWorld/build/smoke-badging.txt
+          grep -q "android.hardware.screen.landscape" BlockWorld/build/smoke-badging.txt
 
-      - name: Verify APK
-        shell: bash
-        run: |
-          set -euxo pipefail
-          unzip -t BlockWorld/build/BlockWorld.apk >/dev/null
-          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose BlockWorld/build/BlockWorld.apk
-          "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/apk-badging.txt
-          grep -q "native-code:.*'x86_64'" BlockWorld/build/apk-badging.txt
-          sha256sum BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/BlockWorld.apk.sha256
-
-      - name: Install and launch APK in Android emulator
+      - name: Install and launch in Android emulator
         shell: bash
         run: |
           set -euxo pipefail
@@ -149,9 +130,6 @@ jobs:
           AVDMANAGER="$ANDROID_HOME/cmdline-tools/16.0/bin/avdmanager"
           test -x "$AVDMANAGER"
           echo no | "$AVDMANAGER" create avd --force --name blockworld-ci --package 'system-images;android-35;google_apis;x86_64' --device 'pixel_6'
-          test -f "$ANDROID_AVD_HOME/blockworld-ci.ini"
-          "$ANDROID_HOME/emulator/emulator" -list-avds | tee BlockWorld/build/avd-list.txt
-          grep -qx 'blockworld-ci' BlockWorld/build/avd-list.txt
           adb start-server
           "$ANDROID_HOME/emulator/emulator" -avd blockworld-ci -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
           BOOTED=0
@@ -160,7 +138,7 @@ jobs:
             sleep 2
           done
           if [ "$BOOTED" != "1" ]; then cat "$RUNNER_TEMP/emulator.log"; exit 1; fi
-          adb install -r BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/install-result.txt
+          adb install -r BlockWorld/build/BlockWorld-smoke.apk | tee BlockWorld/build/install-result.txt
           grep -q 'Success' BlockWorld/build/install-result.txt
           adb logcat -c
           adb shell monkey -p com.example.blockworld -c android.intent.category.LAUNCHER 1
@@ -171,12 +149,35 @@ jobs:
           adb logcat -d > BlockWorld/build/runtime-logcat.txt
           if grep -E 'FATAL EXCEPTION|ANR in com\.example\.blockworld' BlockWorld/build/runtime-logcat.txt; then exit 1; fi
 
+      - name: Export optimized ARM phone APK
+        shell: bash
+        env:
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: /home/runner/.android/debug.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('BlockWorld/export_presets.cfg')
+          s=p.read_text().replace('architectures/x86_64=true','architectures/x86_64=false')
+          p.write_text(s)
+          PY
+          "$GODOT_BIN" --headless --path BlockWorld --export-release Android build/BlockWorld.apk
+          unzip -t BlockWorld/build/BlockWorld.apk >/dev/null
+          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose BlockWorld/build/BlockWorld.apk
+          "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/apk-badging.txt
+          grep -q "native-code:.*'armeabi-v7a'.*'arm64-v8a'" BlockWorld/build/apk-badging.txt
+          if grep -q "native-code:.*'x86_64'" BlockWorld/build/apk-badging.txt; then exit 1; fi
+          grep -q "android.hardware.screen.landscape" BlockWorld/build/apk-badging.txt
+          sha256sum BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/BlockWorld.apk.sha256
+
       - name: Package source
         shell: bash
         run: |
           set -euxo pipefail
-          rm -rf BlockWorld/.godot BlockWorld/build/BlockWorld_Source.zip
-          (cd BlockWorld && zip -qr build/BlockWorld_Source.zip . -x 'build/BlockWorld_Source.zip')
+          rm -rf BlockWorld/.godot BlockWorld/build/BlockWorld_Source.zip BlockWorld/build/BlockWorld-smoke.apk
+          (cd BlockWorld && zip -qr build/BlockWorld_Source.zip . -x 'build/BlockWorld_Source.zip' 'build/BlockWorld.apk')
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -188,7 +189,6 @@ jobs:
             BlockWorld/build/BlockWorld.apk
             BlockWorld/build/BlockWorld.apk.sha256
             BlockWorld/build/apk-badging.txt
-            BlockWorld/build/avd-list.txt
             BlockWorld/build/install-result.txt
             BlockWorld/build/runtime-smoke.txt
             BlockWorld/build/runtime-logcat.txt
