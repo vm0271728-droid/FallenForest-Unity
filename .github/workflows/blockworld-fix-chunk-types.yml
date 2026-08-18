@@ -1,0 +1,144 @@
+name: BlockWorld Fix Chunk Types
+
+on:
+  push:
+    branches: [blockworld-godot-build]
+    paths:
+      - '.github/workflows/blockworld-fix-chunk-types.yml'
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  fix-and-retest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TARGET: blockworld-android.yml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: blockworld-godot-build
+
+      - name: Patch baked source payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          TMP="$RUNNER_TEMP/blockworld-fix"
+          rm -rf "$TMP"
+          mkdir -p "$TMP/src"
+          cat BlockWorld_CI_Source.part* > "$TMP/source.zip.b64"
+          base64 -d "$TMP/source.zip.b64" > "$TMP/source.zip"
+          unzip -tq "$TMP/source.zip" >/dev/null
+          unzip -q "$TMP/source.zip" -d "$TMP/src"
+          test -f "$TMP/src/project.godot"
+          python3 - <<PY
+          from pathlib import Path
+          root=Path('$TMP/src')
+          main=root/'scripts/main.gd'
+          s=main.read_text()
+          s=s.replace('var h := abs((px*7349 + py*9151 + id*31337) ^ (px*py*97 + id*199)) % 100', 'var h: int = abs((px*7349 + py*9151 + id*31337) ^ (px*py*97 + id*199)) % 100')
+          s=s.replace('var k := 0.84 + float(h) / 100.0 * 0.28', 'var k: float = 0.84 + float(h) / 100.0 * 0.28')
+          s=s.replace('var c := Color(clampf(base.r*k,0,1), clampf(base.g*k,0,1), clampf(base.b*k,0,1), base.a)', 'var c: Color = Color(clampf(base.r*k,0,1), clampf(base.g*k,0,1), clampf(base.b*k,0,1), base.a)')
+          main.write_text(s)
+          chunk=root/'scripts/chunk.gd'
+          s=chunk.read_text()
+          s=s.replace('var base := Vector3(x,y,z)', 'var base: Vector3 = Vector3(x,y,z)')
+          s=s.replace('var v = FACE_VERTS[f]', 'var v: Array = FACE_VERTS[f]')
+          s=s.replace('var order = [0,1,2,0,2,3]', 'var order: Array[int] = [0,1,2,0,2,3]')
+          s=s.replace('st.set_normal(NORMALS[f])', 'st.set_normal(Vector3(NORMALS[f]))')
+          s=s.replace('var uv := (tile_origin + FACE_UVS[oi]) / Vector2(ATLAS_COLS,ATLAS_ROWS)', 'var uv: Vector2 = (tile_origin + Vector2(FACE_UVS[oi])) / Vector2(ATLAS_COLS,ATLAS_ROWS)')
+          s=s.replace('st.add_vertex(base + v[oi])', 'st.add_vertex(base + Vector3(v[oi]))')
+          s=s.replace('collision_faces.append(base + v[oi])', 'collision_faces.append(base + Vector3(v[oi]))')
+          chunk.write_text(s)
+          PY
+          grep -q 'var uv: Vector2' "$TMP/src/scripts/chunk.gd"
+          grep -q 'window/handheld/orientation=0' "$TMP/src/project.godot"
+          ! grep -q 'Break a tree' "$TMP/src/scripts/main.gd"
+          (cd "$TMP/src" && zip -qr "$TMP/fixed.zip" .)
+          base64 -w0 "$TMP/fixed.zip" > BlockWorld_CI_Source.part00
+          for f in BlockWorld_CI_Source.part*; do
+            [ "$f" = 'BlockWorld_CI_Source.part00' ] || rm -f "$f"
+          done
+          git add -A BlockWorld_CI_Source.part*
+          git commit -m 'Type BlockWorld chunk atlas mesh values'
+          git push origin HEAD:blockworld-godot-build
+
+      - name: Dispatch clean Android build
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEFORE="$(gh run list --repo "$REPO" --workflow "$TARGET" --branch blockworld-godot-build --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+          gh workflow run "$TARGET" --repo "$REPO" --ref blockworld-godot-build
+          RUN_ID=""
+          for i in $(seq 1 60); do
+            RUN_ID="$(gh run list --repo "$REPO" --workflow "$TARGET" --branch blockworld-godot-build --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "$BEFORE" ]; then break; fi
+            RUN_ID=""
+            sleep 2
+          done
+          test -n "$RUN_ID"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          cat > BlockWorld_CI_LAST_SUCCESS.txt <<EOF
+          status=running
+          target_run_id=$RUN_ID
+          fixer_run_id=$GITHUB_RUN_ID
+          started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          git add BlockWorld_CI_LAST_SUCCESS.txt
+          git commit -m 'Record BlockWorld typed build run'
+          git push origin HEAD:blockworld-godot-build
+
+      - name: Wait and report
+        shell: bash
+        run: |
+          set +e
+          gh run watch "$RUN_ID" --repo "$REPO" --exit-status
+          RC=$?
+          CONCLUSION="$(gh run view "$RUN_ID" --repo "$REPO" --json conclusion --jq .conclusion)"
+          set -e
+          if [ "$RC" -ne 0 ] || [ "$CONCLUSION" != success ]; then
+            cat > BlockWorld_CI_LAST_SUCCESS.txt <<EOF
+          status=failure
+          target_run_id=$RUN_ID
+          fixer_run_id=$GITHUB_RUN_ID
+          completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+            git add BlockWorld_CI_LAST_SUCCESS.txt
+            git commit -m 'Record failed BlockWorld typed build'
+            git push origin HEAD:blockworld-godot-build
+            exit 1
+          fi
+          mkdir -p collected
+          gh run download "$RUN_ID" --repo "$REPO" --name BlockWorld-Android --dir collected
+          HASH="$(awk '{print $1}' collected/BlockWorld.apk.sha256)"
+          cat > BlockWorld_CI_LAST_SUCCESS.txt <<EOF
+          status=success
+          target_run_id=$RUN_ID
+          apk_sha256=$HASH
+          fixer_run_id=$GITHUB_RUN_ID
+          completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          git add BlockWorld_CI_LAST_SUCCESS.txt
+          git commit -m 'Record successful BlockWorld typed build'
+          git push origin HEAD:blockworld-godot-build
+
+      - name: Upload verified APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlockWorld-V2-Typed
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            collected/BlockWorld.apk
+            collected/BlockWorld.apk.sha256
+            collected/apk-badging.txt
+            collected/install-result.txt
+            collected/runtime-smoke.txt
+            collected/runtime-logcat.txt
