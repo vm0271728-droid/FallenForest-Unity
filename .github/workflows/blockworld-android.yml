@@ -6,6 +6,11 @@ on:
     paths:
       - 'BlockWorld_CI_Source.part*'
       - '.github/workflows/blockworld-android.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'BlockWorld_CI_Source.part*'
+      - '.github/workflows/blockworld-android.yml'
   workflow_dispatch:
 
 permissions:
