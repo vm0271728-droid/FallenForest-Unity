@@ -1,0 +1,75 @@
+name: Fallen Forest CI failure probe
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/ci-failure-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  probe:
+    name: Inspect latest failed canonical audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Locate latest failed full release audit and print failing logs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          repo="$GITHUB_REPOSITORY"
+          branch='integration/release-mainline'
+          workflow='release-mainline-android.yml'
+
+          echo "Repository: $repo"
+          echo "Looking for latest failed $workflow push run on $branch"
+
+          runs_json="$(gh api "/repos/$repo/actions/workflows/$workflow/runs?branch=$branch&event=push&per_page=20")"
+          run_id="$(printf '%s' "$runs_json" | jq -r '[.workflow_runs[] | select(.conclusion == "failure")][0].id // empty')"
+
+          if [ -z "$run_id" ]; then
+            echo 'No failed canonical full-release push run found in the latest 20 runs.'
+            exit 0
+          fi
+
+          run_number="$(printf '%s' "$runs_json" | jq -r --argjson id "$run_id" '.workflow_runs[] | select(.id == $id) | .run_number')"
+          head_sha="$(printf '%s' "$runs_json" | jq -r --argjson id "$run_id" '.workflow_runs[] | select(.id == $id) | .head_sha')"
+          run_url="$(printf '%s' "$runs_json" | jq -r --argjson id "$run_id" '.workflow_runs[] | select(.id == $id) | .html_url')"
+          created_at="$(printf '%s' "$runs_json" | jq -r --argjson id "$run_id" '.workflow_runs[] | select(.id == $id) | .created_at')"
+
+          echo "LATEST_FAILED_RUN_ID=$run_id"
+          echo "LATEST_FAILED_RUN_NUMBER=$run_number"
+          echo "LATEST_FAILED_HEAD_SHA=$head_sha"
+          echo "LATEST_FAILED_CREATED_AT=$created_at"
+          echo "LATEST_FAILED_URL=$run_url"
+
+          jobs_json="$(gh api "/repos/$repo/actions/runs/$run_id/jobs?filter=latest&per_page=100")"
+          mapfile -t failed_jobs < <(printf '%s' "$jobs_json" | jq -r '.jobs[] | select(.conclusion == "failure") | [.id, .name] | @tsv')
+
+          if [ "${#failed_jobs[@]}" -eq 0 ]; then
+            echo 'Run conclusion is failure but no failed job was returned.'
+            printf '%s' "$jobs_json" | jq -r '.jobs[] | [.id,.name,.status,.conclusion] | @tsv'
+            exit 0
+          fi
+
+          for row in "${failed_jobs[@]}"; do
+            job_id="${row%%$'\t'*}"
+            job_name="${row#*$'\t'}"
+            log="$RUNNER_TEMP/job-$job_id.log"
+
+            echo "FAILED_JOB_ID=$job_id"
+            echo "FAILED_JOB_NAME=$job_name"
+            gh api -H 'Accept: application/vnd.github+json' "/repos/$repo/actions/jobs/$job_id/logs" > "$log"
+
+            echo "===== FAILURE SIGNALS FOR JOB $job_id ====="
+            grep -nEi 'error CS[0-9]+|InvalidDataException|BuildFailedException|Aborting batchmode|Caught fatal signal|SIGSEGV|Exception:|\berror\b|\bfatal\b|failed|failure' "$log" | tail -n 160 || true
+            echo "===== FINAL 220 LINES FOR JOB $job_id ====="
+            tail -n 220 "$log" || true
+          done

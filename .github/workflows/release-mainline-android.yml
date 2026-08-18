@@ -1,0 +1,390 @@
+name: Fallen Forest full release APK audit
+
+on:
+  push:
+    branches: [ integration/release-mainline ]
+    paths:
+      - 'Assets/**'
+      - 'Packages/**'
+      - 'ProjectSettings/**'
+      - 'Tools/**'
+      - '.github/workflows/release-mainline-android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: fallen-forest-full-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Unity 6 full Android release audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+
+    steps:
+      - name: Checkout clean release branch
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          lfs: false
+
+      - name: Verify preinstalled archive tools
+        timeout-minutes: 1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v 7z >/dev/null 2>&1 || command -v 7zz >/dev/null 2>&1 || command -v 7za >/dev/null 2>&1; then
+            echo 'Using preinstalled 7-Zip from the pinned GitHub ubuntu-24.04 runner.'
+            command -v 7z || command -v 7zz || command -v 7za
+            exit 0
+          fi
+          echo 'Pinned ubuntu-24.04 runner unexpectedly lacks 7-Zip; refusing a broad apt update in release CI.' >&2
+          exit 1
+
+      - name: Download and verify canonical user archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --quiet 'gdown>=5.2,<6'
+
+          python3 -m gdown 'https://drive.google.com/uc?id=1W9RzSrC8SWn1BJCa_i0OU2Wkk0L0LQe6' -O all-needed.zip
+          test -f all-needed.zip
+          test "$(stat -c %s all-needed.zip)" = '85825470'
+          echo '0848ea17b01f750747a37e3af9b0e74723efcba58a253c20e798e30b41a5e9d8  all-needed.zip' | sha256sum -c -
+          python3 Tools/import_all_needed_archive.py all-needed.zip
+
+          python3 -m gdown 'https://drive.google.com/uc?id=11nhh2Q0djgdQm653EQkWJjqSpdJ9SEFk' -O trees.zip
+          test -f trees.zip
+          test "$(stat -c %s trees.zip)" = '198111913'
+          echo '13cc391a560ebddae59d3940a5f17a02083fd1f1f487fdeaba8dea5401df3363  trees.zip' | sha256sum -c -
+          python3 Tools/import_tree_archive.py trees.zip
+
+          test ! -f Assets/FallenForest/Audio/Screamers/amazing-grace-analog-horror.mp3
+          test -f 'Assets/FallenForest/Art/Vegetation/UserTrees/BlackSpruce/Source/Picea mariana HD_Arctic mat 100_LOD0.fbx'
+          test -f 'Assets/FallenForest/Art/Vegetation/UserTrees/BlackSpruce/Source/zzz_LODs/LOD4/Picea mariana HD_Arctic mat 100_LOD4.fbx'
+          test -f Assets/FallenForest/Art/Vegetation/UserTrees/DeadFirs/Source/firs.obj
+          test -f Assets/FallenForest/Art/Vegetation/UserTrees/LowPolyForest/Source/Extracted/Tree_Pack.fbx
+          test -f Assets/FallenForest/Art/Vegetation/UserTrees/LowPolyForest/Source/Extracted/Tree_Pack.obj
+          echo 'Canonical user archives imported and integrity-checked.'
+
+      - name: Fetch vetted CC0 audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Tools/fetch_cc0_audio.py
+
+      - name: Verify Unity ID credentials exist
+        env:
+          UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$UNITY_USERNAME" || { echo 'Missing GitHub secret: UNITY_USERNAME' >&2; exit 2; }
+          test -n "$UNITY_PASSWORD" || { echo 'Missing GitHub secret: UNITY_PASSWORD' >&2; exit 2; }
+
+      - name: Free disk for Unity Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h /
+          sudo rm -rf /opt/ghc /usr/share/dotnet /usr/local/share/boost || true
+          docker system prune -af >/dev/null 2>&1 || true
+          sudo apt-get clean || true
+          df -h /
+
+      - name: Stage Unity Hub without package post-install scripts
+        timeout-minutes: 6
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v xvfb-run >/dev/null 2>&1 || { echo 'Pinned ubuntu-24.04 runner unexpectedly lacks xvfb-run.' >&2; exit 1; }
+          command -v dpkg-deb >/dev/null 2>&1 || { echo 'dpkg-deb is required to stage Unity Hub safely.' >&2; exit 1; }
+
+          sudo install -d /etc/apt/keyrings
+          curl --fail --silent --show-error --location \
+            --retry 4 --retry-delay 3 --connect-timeout 20 --max-time 90 \
+            https://hub.unity3d.com/linux/keys/public \
+            | sudo gpg --dearmor -o /etc/apt/keyrings/unityhub.gpg
+
+          echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/unityhub.gpg] https://hub.unity3d.com/linux/repos/deb stable main' \
+            | sudo tee /etc/apt/sources.list.d/unityhub.list >/dev/null
+
+          timeout 90s sudo apt-get \
+            -o Acquire::Retries=2 \
+            -o Acquire::ForceIPv4=true \
+            -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 \
+            -o Dir::Etc::sourcelist='sources.list.d/unityhub.list' \
+            -o Dir::Etc::sourceparts='-' \
+            -o APT::Get::List-Cleanup='0' \
+            update
+
+          deb_dir="$RUNNER_TEMP/unityhub-debs"
+          hub_root="$RUNNER_TEMP/unityhub-root"
+          mkdir -p "$deb_dir" "$hub_root"
+          (
+            cd "$deb_dir"
+            timeout 180s apt-get \
+              -o Acquire::Retries=2 \
+              -o Acquire::ForceIPv4=true \
+              -o Acquire::http::Timeout=20 \
+              -o Acquire::https::Timeout=20 \
+              download unityhub=3.20.1 libnotify4 libsecret-1-0 libsecret-common
+          )
+
+          shopt -s nullglob
+          debs=("$deb_dir"/*.deb)
+          test "${#debs[@]}" -ge 4 || { echo "Expected at least four staged DEB files, got ${#debs[@]}." >&2; exit 1; }
+          for deb in "${debs[@]}"; do
+            dpkg-deb -x "$deb" "$hub_root"
+          done
+
+          hub="$(find "$hub_root" -type f \( -path '*/unityhub' -o -path '*/UnityHub' \) -perm -u+x -print -quit 2>/dev/null || true)"
+          test -n "$hub" && test -x "$hub" || { echo 'Unity Hub executable not found in staged package.' >&2; exit 1; }
+          licensing_client="$(find "$hub_root" -type f -name Unity.Licensing.Client -perm -u+x -print -quit 2>/dev/null || true)"
+          test -n "$licensing_client" || { echo 'Unity.Licensing.Client not found in staged Unity Hub package.' >&2; exit 1; }
+
+          hub_lib="$hub_root/usr/lib/x86_64-linux-gnu"
+          if [ -d "$hub_lib" ]; then
+            echo "LD_LIBRARY_PATH=$hub_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+            export LD_LIBRARY_PATH="$hub_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          fi
+
+          timeout 60s xvfb-run -a "$hub" --no-sandbox --headless help --errors >/tmp/unityhub-help.txt 2>&1 || {
+            cat /tmp/unityhub-help.txt || true
+            echo 'Staged Unity Hub failed its headless CLI smoke test.' >&2
+            exit 1
+          }
+          cat /tmp/unityhub-help.txt
+          echo "UNITY_HUB_PATH=$hub" >> "$GITHUB_ENV"
+          echo "UNITY_LICENSING_CLIENT_PATH=$licensing_client" >> "$GITHUB_ENV"
+
+      - name: Install Unity 6.0.76f1 and Android modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_root="$HOME/Unity/Hub/Editor"
+          mkdir -p "$install_root"
+          xvfb-run -a "$UNITY_HUB_PATH" --no-sandbox --headless install-path -s "$install_root" --errors
+          xvfb-run -a "$UNITY_HUB_PATH" --no-sandbox --headless install \
+            --version 6000.0.76f1 \
+            --changeset 6f7f9e1c9e8a \
+            --module android \
+            --childModules \
+            --errors
+          editor="$install_root/6000.0.76f1/Editor/Unity"
+          test -x "$editor" || { echo 'Unity 6000.0.76f1 editor missing.' >&2; exit 1; }
+          echo "UNITY_EDITOR_PATH=$editor" >> "$GITHUB_ENV"
+
+      - name: Verify Unity Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          android_player="$(dirname "$UNITY_EDITOR_PATH")/Data/PlaybackEngines/AndroidPlayer"
+          test -f "$android_player/UnityEditor.Android.Extensions.dll"
+          test -d "$android_player/SDK/platform-tools"
+          test -f "$android_player/NDK/source.properties"
+          test -x "$android_player/OpenJDK/bin/java"
+          grep -E 'Pkg.Revision|Pkg.Desc' "$android_player/NDK/source.properties" || true
+          "$android_player/OpenJDK/bin/java" -version
+
+      - name: Activate Unity Personal
+        uses: buildalon/activate-unity-license@v2
+        with:
+          license: Personal
+          username: ${{ secrets.UNITY_USERNAME }}
+          password: ${{ secrets.UNITY_PASSWORD }}
+          license-version: 6.x
+
+      - name: Compile and import exact release project
+        shell: bash
+        run: |
+          set -uo pipefail
+          log="$RUNNER_TEMP/unity-release-import.log"
+          set +e
+          "$UNITY_EDITOR_PATH" \
+            -batchmode \
+            -nographics \
+            -quit \
+            -projectPath "$GITHUB_WORKSPACE" \
+            -logFile "$log"
+          rc=$?
+          set -e
+          cat "$log" || true
+
+          if grep -Eq 'error CS[0-9]{4}' "$log"; then
+            echo 'C# compiler error detected in canonical release import.' >&2
+            exit 1
+          fi
+          if grep -Fq 'Aborting batchmode due to failure' "$log"; then
+            echo 'Unity explicitly aborted batchmode due to a project/import failure.' >&2
+            [ "$rc" -ne 0 ] && exit "$rc"
+            exit 1
+          fi
+          if [ "$rc" -eq 0 ]; then
+            echo 'Canonical release compile/import completed cleanly.'
+            exit 0
+          fi
+          if [ "$rc" -eq 139 ] \
+            && grep -Fq 'Batchmode quit successfully invoked - shutting down!' "$log" \
+            && grep -Fq 'Caught fatal signal - signo:11' "$log"; then
+            echo '::warning::Verified Unity teardown SIGSEGV after successful compile/import; accepting compile stage.'
+            exit 0
+          fi
+          if [ "$rc" -eq 134 ] \
+            && grep -Fq 'Batchmode quit successfully invoked - shutting down!' "$log" \
+            && grep -Fq 'Fatal Error! Cannot create web request without initializing the system' "$log" \
+            && grep -Fq 'Caught fatal signal - signo:6' "$log"; then
+            echo '::warning::Verified Unity Analytics/WebRequest teardown SIGABRT after successful compile/import; accepting compile stage.'
+            exit 0
+          fi
+          echo "Canonical release compile/import failed with exit code $rc." >&2
+          exit "$rc"
+
+      - name: Refresh Unity Personal immediately before APK build
+        uses: buildalon/activate-unity-license@v2
+        with:
+          license: Personal
+          username: ${{ secrets.UNITY_USERNAME }}
+          password: ${{ secrets.UNITY_PASSWORD }}
+          license-version: 6.x
+
+      - name: Build real development-signed APK
+        timeout-minutes: 50
+        shell: bash
+        run: |
+          set -uo pipefail
+          apk='Builds/Android/Fallen_Forest_1.0.0.apk'
+          log="$RUNNER_TEMP/unity-release-build.log"
+          rm -f "$apk" "$log"
+          touch "$log"
+
+          # Keep Android selected before project load and use Xvfb/software GL,
+          # but restore batchmode so -executeMethod runs deterministically.
+          set +e
+          setsid env LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a "$UNITY_EDITOR_PATH" \
+            -batchmode \
+            -quit \
+            -buildTarget Android \
+            -projectPath "$GITHUB_WORKSPACE" \
+            -executeMethod FallenForest.EditorTools.FallenForestProjectBuilder.CIBuildAndroid \
+            -logFile "$log" &
+          unity_pid=$!
+          set -e
+
+          tail --pid="$unity_pid" -n +1 -F "$log" &
+          tail_pid=$!
+
+          last_size=0
+          last_change=$(date +%s)
+          watchdog_failed=0
+
+          while kill -0 "$unity_pid" 2>/dev/null; do
+            sleep 20
+            size=$(stat -c %s "$log" 2>/dev/null || echo 0)
+            now=$(date +%s)
+            if [ "$size" -ne "$last_size" ]; then
+              last_size="$size"
+              last_change="$now"
+            elif [ $((now - last_change)) -ge 900 ]; then
+              echo '::error::Unity build log has not changed for 15 minutes; terminating stalled Editor.'
+              watchdog_failed=1
+              kill -TERM -- "-$unity_pid" 2>/dev/null || true
+              sleep 15
+              kill -KILL -- "-$unity_pid" 2>/dev/null || true
+              break
+            fi
+          done
+
+          set +e
+          wait "$unity_pid"
+          rc=$?
+          set -e
+          wait "$tail_pid" 2>/dev/null || true
+
+          if [ "$watchdog_failed" -eq 1 ]; then
+            echo 'Last 200 Unity log lines:'
+            tail -n 200 "$log" || true
+            exit 124
+          fi
+
+          if grep -Eq 'error CS[0-9]{4}' "$log"; then
+            echo 'C# compiler error detected during canonical APK build.' >&2
+            exit 1
+          fi
+          if grep -Fq 'Aborting batchmode due to failure' "$log"; then
+            echo 'Unity explicitly aborted the APK build.' >&2
+            [ "$rc" -ne 0 ] && exit "$rc"
+            exit 1
+          fi
+          if [ ! -s "$apk" ]; then
+            echo "APK is missing or empty after Unity build: $apk" >&2
+            echo "Unity exit code: $rc" >&2
+            exit 1
+          fi
+          if ! grep -Fq 'Fallen Forest APK built:' "$log"; then
+            echo 'Unity did not emit the successful Fallen Forest build marker.' >&2
+            exit 1
+          fi
+          unzip -tqq "$apk" || {
+            echo 'APK ZIP structure validation failed.' >&2
+            exit 1
+          }
+
+          if [ "$rc" -eq 0 ]; then
+            echo 'Canonical Unity Android build completed cleanly.'
+            exit 0
+          fi
+
+          if [ "$rc" -eq 139 ] \
+            && grep -Fq 'Batchmode quit successfully invoked - shutting down!' "$log" \
+            && grep -Fq 'Caught fatal signal - signo:11' "$log"; then
+            echo '::warning::Verified Unity teardown SIGSEGV after a validated successful APK build; accepting the artifact.'
+            exit 0
+          fi
+
+          if [ "$rc" -eq 134 ] \
+            && grep -Fq 'Batchmode quit successfully invoked - shutting down!' "$log" \
+            && grep -Fq 'Fatal Error! Cannot create web request without initializing the system' "$log" \
+            && grep -Fq 'Caught fatal signal - signo:6' "$log"; then
+            echo '::warning::Verified Unity Analytics/WebRequest teardown SIGABRT after a validated successful APK build; accepting the artifact.'
+            exit 0
+          fi
+
+          echo "Unity returned exit code $rc after producing the APK, but it was not a verified post-success teardown crash." >&2
+          exit "$rc"
+
+      - name: Verify produced APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk='Builds/Android/Fallen_Forest_1.0.0.apk'
+          test -s "$apk"
+          unzip -tqq "$apk"
+          unzip -l "$apk" | grep -F 'AndroidManifest.xml'
+          unzip -l "$apk" | grep -F 'lib/arm64-v8a/libil2cpp.so'
+          unzip -l "$apk" | grep -F 'lib/arm64-v8a/libunity.so'
+          ls -lh "$apk"
+          sha256sum "$apk"
+
+      - name: Upload Unity diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fallen-Forest-Unity-release-logs
+          path: |
+            ${{ runner.temp }}/unity-release-import.log
+            ${{ runner.temp }}/unity-release-build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fallen-Forest-Android-APK
+          path: Builds/Android/Fallen_Forest_1.0.0.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

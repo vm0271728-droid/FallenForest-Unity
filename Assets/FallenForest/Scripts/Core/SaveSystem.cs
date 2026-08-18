@@ -7,6 +7,7 @@ namespace FallenForest.Core
         private const string DocsKey = "ff_docs";
         private const string DocMaskKey = "ff_doc_mask";
         private const string BoiledKey = "ff_boiled_seen";
+        private const string BoiledInfluenceKey = "ff_boiled_influenced";
         private const string SeedKey = "ff_run_seed";
         private const string HasRunKey = "ff_has_run";
         private const string PosX = "ff_pos_x";
@@ -31,6 +32,7 @@ namespace FallenForest.Core
 
         public static int DocumentMask => PlayerPrefs.GetInt(DocMaskKey, 0);
         public static bool HasRun => PlayerPrefs.GetInt(HasRunKey, 0) == 1;
+        public static bool BoiledInfluenced => PlayerPrefs.GetInt(BoiledInfluenceKey, 0) == 1;
 
         public static void BeginNewRun()
         {
@@ -64,6 +66,14 @@ namespace FallenForest.Core
             return (DocumentMask & (1 << documentSlot)) != 0;
         }
 
+        public static void MarkBoiledInfluenced()
+        {
+            PlayerPrefs.SetInt(BoiledInfluenceKey, 1);
+            PlayerPrefs.SetInt(HasRunKey, 1);
+            _ = RunSeed;
+            PlayerPrefs.Save();
+        }
+
         public static void SavePlayerPosition(Vector3 position)
         {
             PlayerPrefs.SetFloat(PosX, position.x);
@@ -88,6 +98,7 @@ namespace FallenForest.Core
             PlayerPrefs.DeleteKey(DocsKey);
             PlayerPrefs.DeleteKey(DocMaskKey);
             PlayerPrefs.DeleteKey(BoiledKey);
+            PlayerPrefs.DeleteKey(BoiledInfluenceKey);
             PlayerPrefs.DeleteKey(SeedKey);
             PlayerPrefs.DeleteKey(HasRunKey);
             PlayerPrefs.DeleteKey(PosX);
