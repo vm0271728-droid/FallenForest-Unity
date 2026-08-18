@@ -20,6 +20,27 @@ jobs:
       REPO: ${{ github.repository }}
       TARGET_WORKFLOW: blockworld-android.yml
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: blockworld-godot-build
+
+      - name: Publish running marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          cat > BlockWorld_CI_LAST_SUCCESS.txt <<EOF
+          status=running
+          gate_run_id=$GITHUB_RUN_ID
+          gate_head=$(git rev-parse HEAD)
+          started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          git add BlockWorld_CI_LAST_SUCCESS.txt
+          git commit -m 'Record running BlockWorld Android build'
+          git push origin HEAD:blockworld-godot-build
+
       - name: Dispatch BlockWorld Android build
         shell: bash
         run: |
@@ -81,13 +102,10 @@ jobs:
           cat > BlockWorld_CI_LAST_SUCCESS.txt <<EOF
           status=success
           target_run_id=$RUN_ID
-          source_head=$(git rev-parse HEAD)
           apk_sha256=$HASH
           gate_run_id=$GITHUB_RUN_ID
           completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add BlockWorld_CI_LAST_SUCCESS.txt
-          git commit -m 'Record successful BlockWorld Android build' || exit 0
+          git commit -m 'Record successful BlockWorld Android build'
           git push origin HEAD:blockworld-godot-build
