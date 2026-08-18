@@ -26,7 +26,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore and overhaul BlockWorld source
+      - name: Restore baked BlockWorld source
         shell: bash
         run: |
           set -euxo pipefail
@@ -36,51 +36,18 @@ jobs:
           mkdir -p BlockWorld
           unzip -q "$RUNNER_TEMP/BlockWorld_Source.zip" -d BlockWorld
           test -f BlockWorld/project.godot
-
-          # Bring the archived source to the exact baseline the tested v1 artifact used.
-          python3 - <<'PY'
-          from pathlib import Path
-          main = Path('BlockWorld/scripts/main.gd')
-          s = main.read_text()
-          s = s.replace('var cc:=chunk_queue.pop_front()', 'var cc:Vector2i=chunk_queue.pop_front()')
-          s = s.replace('var cc:=rebuild_queue.pop_front()', 'var cc:Vector2i=rebuild_queue.pop_front()')
-          main.write_text(s)
-          chunk = Path('BlockWorld/scripts/chunk.gd')
-          s = chunk.read_text()
-          s = s.replace('var local_n := Vector3i(x,y,z) + DIRS[f]', 'var local_n: Vector3i = Vector3i(x,y,z) + Vector3i(DIRS[f])')
-          s = s.replace('var gp := Vector3i(coord.x*SIZE+x, y, coord.y*SIZE+z) + DIRS[f]', 'var gp: Vector3i = Vector3i(coord.x*SIZE+x, y, coord.y*SIZE+z) + Vector3i(DIRS[f])')
-          chunk.write_text(s)
-          project = Path('BlockWorld/project.godot')
-          s = project.read_text()
-          marker = 'textures/canvas_textures/default_texture_filter=0'
-          if 'textures/vram_compression/import_etc2_astc=true' not in s:
-              s = s.replace(marker, marker + '\ntextures/vram_compression/import_etc2_astc=true')
-          project.write_text(s)
-          preset = Path('BlockWorld/export_presets.cfg')
-          s = preset.read_text().replace('architectures/x86_64=false','architectures/x86_64=true')
-          preset.write_text(s)
-          PY
-
-          # Compressed unified diff: landscape lock, no startup hint, procedural pixel atlas,
-          # segmented/animated voxel mobs, reduced per-frame work and faster chunk generation.
-          cat > "$RUNNER_TEMP/blockworld-v2.patch.gz.b64" <<'PATCH64'
-          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
-          PATCH64
-          base64 -d "$RUNNER_TEMP/blockworld-v2.patch.gz.b64" | gzip -d > "$RUNNER_TEMP/blockworld-v2.patch"
-          (cd BlockWorld && patch -p1 < "$RUNNER_TEMP/blockworld-v2.patch")
-
-          # Smoke APK needs x86_64 for the hosted emulator; final phone APK will remove it again.
+          grep -q 'window/handheld/orientation=0' BlockWorld/project.godot
+          grep -q 'window/frame_pacing/android/enable_frame_pacing=true' BlockWorld/project.godot
+          ! grep -q 'Break a tree' BlockWorld/scripts/main.gd
+          grep -q '_build_block_atlas' BlockWorld/scripts/main.gd
+          grep -q '_build_voxel_body' BlockWorld/scripts/mob.gd
+          grep -q 'var h: int = abs' BlockWorld/scripts/main.gd
           python3 - <<'PY'
           from pathlib import Path
           p=Path('BlockWorld/export_presets.cfg')
           s=p.read_text().replace('architectures/x86_64=false','architectures/x86_64=true')
           p.write_text(s)
           PY
-          grep -q 'window/handheld/orientation=0' BlockWorld/project.godot
-          grep -q 'window/frame_pacing/android/enable_frame_pacing=true' BlockWorld/project.godot
-          ! grep -q 'Break a tree' BlockWorld/scripts/main.gd
-          grep -q '_build_block_atlas' BlockWorld/scripts/main.gd
-          grep -q '_build_voxel_body' BlockWorld/scripts/mob.gd
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -112,6 +79,7 @@ jobs:
           unzip -q "$RUNNER_TEMP/godot/templates.tpz" -d "$RUNNER_TEMP/godot/template_unpack"
           cp -a "$RUNNER_TEMP/godot/template_unpack/templates/." "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
           "$GODOT_BIN" --version
+          test -f "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_release.apk"
 
       - name: Configure Android export
         shell: bash
@@ -147,10 +115,11 @@ jobs:
           mkdir -p BlockWorld/build
           "$GODOT_BIN" --headless --path BlockWorld --export-release Android build/BlockWorld-smoke.apk
           test -s BlockWorld/build/BlockWorld-smoke.apk
+          unzip -t BlockWorld/build/BlockWorld-smoke.apk >/dev/null
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose BlockWorld/build/BlockWorld-smoke.apk
           "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging BlockWorld/build/BlockWorld-smoke.apk | tee BlockWorld/build/smoke-badging.txt
           grep -q "native-code:.*'x86_64'" BlockWorld/build/smoke-badging.txt
-          grep -q "android.hardware.screen.landscape" BlockWorld/build/smoke-badging.txt
+          grep -q 'android.hardware.screen.landscape' BlockWorld/build/smoke-badging.txt
 
       - name: Install and launch in Android emulator
         shell: bash
@@ -202,7 +171,7 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/apk-badging.txt
           grep -q "native-code:.*'armeabi-v7a'.*'arm64-v8a'" BlockWorld/build/apk-badging.txt
           if grep -q "native-code:.*'x86_64'" BlockWorld/build/apk-badging.txt; then exit 1; fi
-          grep -q "android.hardware.screen.landscape" BlockWorld/build/apk-badging.txt
+          grep -q 'android.hardware.screen.landscape' BlockWorld/build/apk-badging.txt
           sha256sum BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/BlockWorld.apk.sha256
 
       - name: Package source
