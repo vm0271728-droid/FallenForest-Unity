@@ -4,8 +4,9 @@
 Release rules:
 - Black Spruce: fully expand LOD0-LOD4 FBX + textures.
 - Dead firs: expand the nested OBJ/MTL pack + textures.
-- Low-poly forest pack: preserve the original RAR, then extract its FBX/OBJ/MTL and textures with
-  7-Zip. CI installs p7zip/7zip explicitly; failure to unpack this user model is a hard release error.
+- Low-poly forest pack: preserve the original RAR, then extract its Unity-ready FBX/OBJ/MTL and textures with
+  7-Zip. Redundant Blender source files are removed from the Unity Assets tree because the same pack already
+  includes FBX/OBJ/MTL and release CI intentionally does not install Blender.
 - Never substitute placeholder geometry for a failed source import.
 """
 from __future__ import annotations
@@ -67,7 +68,7 @@ def extract_rar_with_7zip(rar_path: Path, destination: Path) -> None:
     if seven_zip is None:
         raise RuntimeError(
             "7-Zip is required to unpack LOW POLY FOREST TREE PACK.rar. "
-            "The release workflow must install p7zip-full/7zip; source substitution is forbidden."
+            "The release workflow must provide 7-Zip; source substitution is forbidden."
         )
     destination.mkdir(parents=True, exist_ok=True)
     process = subprocess.run(
@@ -79,6 +80,19 @@ def extract_rar_with_7zip(rar_path: Path, destination: Path) -> None:
     )
     if process.returncode != 0:
         raise RuntimeError(f"7-Zip failed to extract {rar_path.name}:\n{process.stdout}")
+
+
+def remove_redundant_blender_sources(root: Path) -> None:
+    """Keep Unity-ready FBX/OBJ and stop Unity from trying to launch Blender in headless CI."""
+    removed = []
+    for item in root.rglob("*"):
+        if item.is_file() and item.suffix.lower().startswith(".blend"):
+            item.unlink()
+            removed.append(item)
+    if removed:
+        print("Removed redundant Blender-only low-poly tree sources from Unity import path:")
+        for item in removed:
+            print(f" - {item}")
 
 
 def import_archive(archive: Path) -> None:
@@ -143,6 +157,7 @@ def import_archive(archive: Path) -> None:
         if not forest_root.exists():
             raise RuntimeError("Low-poly RAR did not contain FOREST_TREE_PACK root.")
         copy_tree(forest_root / "SOURCE", low_dst_source / "Extracted")
+        remove_redundant_blender_sources(low_dst_source / "Extracted")
         copy_tree(forest_root / "TEXTURES", low_dst / "Textures")
         # The outer ZIP duplicates most textures; preserve those too, but never overwrite exact
         # nested paths in a way that loses the author's folder organization.
