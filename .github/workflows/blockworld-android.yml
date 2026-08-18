@@ -42,17 +42,23 @@ jobs:
           text = text.replace('var cc:=chunk_queue.pop_front()', 'var cc:Vector2i=chunk_queue.pop_front()')
           text = text.replace('var cc:=rebuild_queue.pop_front()', 'var cc:Vector2i=rebuild_queue.pop_front()')
           main.write_text(text)
+
           chunk = Path('BlockWorld/scripts/chunk.gd')
           c = chunk.read_text()
           c = c.replace('var local_n := Vector3i(x,y,z) + DIRS[f]', 'var local_n: Vector3i = Vector3i(x,y,z) + Vector3i(DIRS[f])')
           c = c.replace('var gp := Vector3i(coord.x*SIZE+x, y, coord.y*SIZE+z) + DIRS[f]', 'var gp: Vector3i = Vector3i(coord.x*SIZE+x, y, coord.y*SIZE+z) + Vector3i(DIRS[f])')
           chunk.write_text(c)
+
           project = Path('BlockWorld/project.godot')
           p = project.read_text()
           marker = 'textures/canvas_textures/default_texture_filter=0'
           if 'textures/vram_compression/import_etc2_astc=true' not in p:
               p = p.replace(marker, marker + '\ntextures/vram_compression/import_etc2_astc=true')
           project.write_text(p)
+
+          preset = Path('BlockWorld/export_presets.cfg')
+          e = preset.read_text().replace('architectures/x86_64=false', 'architectures/x86_64=true')
+          preset.write_text(e)
           PY
 
       - name: Set up Java 17
@@ -68,7 +74,7 @@ jobs:
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.1' 'cmdline-tools;latest' 'cmake;3.10.2.4988404' 'ndk;28.1.13356709' 'emulator' 'system-images;android-35;google_apis;x86_64'
+          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.1' 'cmake;3.10.2.4988404' 'ndk;28.1.13356709' 'emulator' 'system-images;android-35;google_apis;x86_64'
 
       - name: Download Godot and Android export templates
         shell: bash
@@ -129,6 +135,7 @@ jobs:
           unzip -t BlockWorld/build/BlockWorld.apk >/dev/null
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose BlockWorld/build/BlockWorld.apk
           "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/apk-badging.txt
+          grep -q "native-code:.*'x86_64'" BlockWorld/build/apk-badging.txt
           sha256sum BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/BlockWorld.apk.sha256
 
       - name: Install and launch APK in Android emulator
@@ -136,7 +143,15 @@ jobs:
         run: |
           set -euxo pipefail
           export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
-          echo no | avdmanager create avd --force --name blockworld-ci --package 'system-images;android-35;google_apis;x86_64' --device 'pixel_6'
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          sudo chmod 666 /dev/kvm || true
+          AVDMANAGER="$ANDROID_HOME/cmdline-tools/16.0/bin/avdmanager"
+          test -x "$AVDMANAGER"
+          echo no | "$AVDMANAGER" create avd --force --name blockworld-ci --package 'system-images;android-35;google_apis;x86_64' --device 'pixel_6'
+          test -f "$ANDROID_AVD_HOME/blockworld-ci.ini"
+          "$ANDROID_HOME/emulator/emulator" -list-avds | tee BlockWorld/build/avd-list.txt
+          grep -qx 'blockworld-ci' BlockWorld/build/avd-list.txt
           adb start-server
           "$ANDROID_HOME/emulator/emulator" -avd blockworld-ci -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
           BOOTED=0
@@ -146,9 +161,10 @@ jobs:
           done
           if [ "$BOOTED" != "1" ]; then cat "$RUNNER_TEMP/emulator.log"; exit 1; fi
           adb install -r BlockWorld/build/BlockWorld.apk | tee BlockWorld/build/install-result.txt
+          grep -q 'Success' BlockWorld/build/install-result.txt
           adb logcat -c
           adb shell monkey -p com.example.blockworld -c android.intent.category.LAUNCHER 1
-          sleep 10
+          sleep 12
           PID="$(adb shell pidof com.example.blockworld | tr -d '\r')"
           echo "PID=$PID" | tee BlockWorld/build/runtime-smoke.txt
           test -n "$PID"
@@ -172,6 +188,7 @@ jobs:
             BlockWorld/build/BlockWorld.apk
             BlockWorld/build/BlockWorld.apk.sha256
             BlockWorld/build/apk-badging.txt
+            BlockWorld/build/avd-list.txt
             BlockWorld/build/install-result.txt
             BlockWorld/build/runtime-smoke.txt
             BlockWorld/build/runtime-logcat.txt
