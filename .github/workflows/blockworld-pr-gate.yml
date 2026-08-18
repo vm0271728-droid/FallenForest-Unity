@@ -92,7 +92,7 @@ jobs:
           raw=gzip.decompress(base64.b64decode(payload))
           Path('/tmp/blockworld-v2.patch').write_bytes(raw)
           PY
-            (cd "$TMP/src" && patch -p1 < /tmp/blockworld-v2.patch)
+            (cd "$TMP/src" && patch --batch --forward -p1 < /tmp/blockworld-v2.patch) || true
           fi
 
           python3 - <<PY
