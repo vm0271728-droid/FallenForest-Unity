@@ -265,6 +265,14 @@ jobs:
             exit 0
           fi
 
+          if [ "$rc" -eq 134 ] \
+            && grep -Fq 'Batchmode quit successfully invoked - shutting down!' "$log" \
+            && grep -Fq 'Fatal Error! Cannot create web request without initializing the system' "$log" \
+            && grep -Fq 'Caught fatal signal - signo:6' "$log"; then
+            echo '::warning::Unity 6 Linux Editor hit the verified Analytics/WebRequest SIGABRT during teardown after successful batchmode quit; compile/import is accepted.'
+            exit 0
+          fi
+
           echo "Canonical release compile/import failed with exit code $rc." >&2
           exit "$rc"
 
@@ -324,7 +332,15 @@ jobs:
             exit 0
           fi
 
-          echo "Unity returned exit code $rc after producing the APK, but it was not the verified post-success teardown SIGSEGV." >&2
+          if [ "$rc" -eq 134 ] \
+            && grep -Fq 'Batchmode quit successfully invoked - shutting down!' "$log" \
+            && grep -Fq 'Fatal Error! Cannot create web request without initializing the system' "$log" \
+            && grep -Fq 'Caught fatal signal - signo:6' "$log"; then
+            echo '::warning::Unity 6 Linux Editor hit the verified Analytics/WebRequest SIGABRT after a validated successful APK build; accepting the artifact.'
+            exit 0
+          fi
+
+          echo "Unity returned exit code $rc after producing the APK, but it was not a verified post-success Unity teardown crash." >&2
           exit "$rc"
 
       - name: Verify produced APK
