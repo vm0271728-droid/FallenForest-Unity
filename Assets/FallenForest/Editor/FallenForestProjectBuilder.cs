@@ -41,6 +41,7 @@ namespace FallenForest.EditorTools
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
             FallenForestUserMaterialBuilder.ApplyIfAvailable();
+            FallenForestReleaseMaterialIntegrator.Apply();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
