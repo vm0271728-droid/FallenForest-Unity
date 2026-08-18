@@ -162,7 +162,7 @@ namespace FallenForest.Player
             float speed = Mathf.Clamp01(player.NormalizedSpeed);
             float nx = Mathf.PerlinNoise(seed + 31f, Time.unscaledTime * 1.7f) * 2f - 1f;
             float ny = Mathf.PerlinNoise(seed + 53f, Time.unscaledTime * 1.35f) * 2f - 1f;
-            Vector3 pos = new(nx, ny, 0f) * motionNoise * speed * 1.65f;
+            Vector3 pos = new Vector3(nx, ny, 0f) * motionNoise * speed * 1.65f;
             Quaternion rot = Quaternion.Euler(ny * .65f * speed, nx * .9f * speed, nx * .55f * speed);
             ApplyFlashlightOffset(pos, rot);
         }
