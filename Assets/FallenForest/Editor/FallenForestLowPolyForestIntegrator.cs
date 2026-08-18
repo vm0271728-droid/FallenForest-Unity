@@ -12,14 +12,18 @@ using UnityEngine.SceneManagement;
 namespace FallenForest.EditorTools
 {
     /// <summary>
-    /// Converts the exact low-poly Tree_Pack.fbx from the user's Drive archive into individually
-    /// scatterable tree/rock prefabs with URP materials. No primitive geometry is used as a visual.
+    /// Converts the exact low-poly Tree_Pack sources from the user's Drive archive into individually
+    /// scatterable tree/rock prefabs with URP materials. FBX and OBJ are both required primary model
+    /// sources; neither is treated as an optional fallback. Runtime prefab generation uses the FBX
+    /// representation to avoid duplicating the same authored geometry while OBJ import is validated
+    /// as an equally required canonical source. No primitive geometry is used as a visual.
     /// </summary>
     public static class FallenForestLowPolyForestIntegrator
     {
         private const string Root = "Assets/FallenForest";
         private const string SourceRoot = Root + "/Art/Vegetation/UserTrees/LowPolyForest";
         private const string SourceFbx = SourceRoot + "/Source/Extracted/Tree_Pack.fbx";
+        private const string SourceObj = SourceRoot + "/Source/Extracted/Tree_Pack.obj";
         private const string PrefabDir = Root + "/Prefabs/Vegetation/LowPolyForest";
         private const string MaterialDir = Root + "/Materials/UserContent/LowPolyForest";
         private const string ForestScene = Root + "/Scenes/Forest.unity";
@@ -38,14 +42,30 @@ namespace FallenForest.EditorTools
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
             DeleteOldGeneratedPrefabs();
 
-            GameObject source = AssetDatabase.LoadAssetAtPath<GameObject>(SourceFbx);
-            if (source == null)
-                throw new InvalidDataException("User low-poly forest FBX was not imported: " + SourceFbx);
+            GameObject sourceFbx = AssetDatabase.LoadAssetAtPath<GameObject>(SourceFbx);
+            if (sourceFbx == null)
+                throw new InvalidDataException("Primary user low-poly forest FBX was not imported: " + SourceFbx);
 
-            GameObject instance = PrefabUtility.InstantiatePrefab(source) as GameObject;
-            if (instance == null) instance = UnityEngine.Object.Instantiate(source);
+            GameObject sourceObj = AssetDatabase.LoadAssetAtPath<GameObject>(SourceObj);
+            if (sourceObj == null)
+                throw new InvalidDataException("Primary user low-poly forest OBJ was not imported: " + SourceObj);
+
+            Renderer[] fbxRenderers = sourceFbx.GetComponentsInChildren<Renderer>(true);
+            Renderer[] objRenderers = sourceObj.GetComponentsInChildren<Renderer>(true);
+            if (fbxRenderers.Length == 0)
+                throw new InvalidDataException("Primary Tree_Pack.fbx imported without usable renderers.");
+            if (objRenderers.Length == 0)
+                throw new InvalidDataException("Primary Tree_Pack.obj imported without usable renderers.");
+
+            Debug.Log($"Fallen Forest: dual-primary low-poly sources validated — FBX renderers={fbxRenderers.Length}, OBJ renderers={objRenderers.Length}.");
+
+            // FBX and OBJ are two primary representations of the same authored pack. Building the
+            // runtime prefab set from both would duplicate the same trees/rocks, so the FBX instance
+            // is used for prefab extraction after both primary sources have passed import validation.
+            GameObject instance = PrefabUtility.InstantiatePrefab(sourceFbx) as GameObject;
+            if (instance == null) instance = UnityEngine.Object.Instantiate(sourceFbx);
             if (instance == null)
-                throw new InvalidOperationException("Could not instantiate user Tree_Pack.fbx.");
+                throw new InvalidOperationException("Could not instantiate primary user Tree_Pack.fbx.");
 
             try
             {
@@ -92,7 +112,7 @@ namespace FallenForest.EditorTools
 
                 AssetDatabase.SaveAssets();
                 AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
-                Debug.Log($"Fallen Forest: user low-poly pack built into {treeCount} tree and {rockCount} rock prefabs from {logicalRoots.Count} logical FBX roots.");
+                Debug.Log($"Fallen Forest: dual-primary low-poly pack built into {treeCount} tree and {rockCount} rock prefabs from {logicalRoots.Count} logical FBX roots after FBX+OBJ validation.");
             }
             finally
             {
@@ -107,7 +127,7 @@ namespace FallenForest.EditorTools
             List<GameObject> treePrefabs = LoadGeneratedPrefabs("LowPolyTree_");
             List<GameObject> rockPrefabs = LoadGeneratedPrefabs("LowPolyRock_");
             if (treePrefabs.Count == 0)
-                throw new InvalidDataException("No LowPolyTree prefabs exist after building the user Tree_Pack.fbx.");
+                throw new InvalidDataException("No LowPolyTree prefabs exist after building the user Tree_Pack sources.");
 
             Scene previous = SceneManager.GetActiveScene();
             Scene scene = EditorSceneManager.OpenScene(ForestScene, OpenSceneMode.Single);
@@ -235,8 +255,6 @@ namespace FallenForest.EditorTools
             bool treeSemantic = IsTreeSemantic(semantic);
             bool rockSemantic = IsRockSemantic(semantic);
 
-            // A semantically coherent group is one authored object even if it has several child
-            // renderers (for example trunk + two branch cards). Never split that object apart.
             if (treeSemantic != rockSemantic)
             {
                 result.Add(node);
@@ -248,7 +266,6 @@ namespace FallenForest.EditorTools
                 if (child.GetComponentsInChildren<Renderer>(true).Length > 0)
                     rendererChildren.Add(child);
 
-            // Mixed semantic wrapper (whole forest pack) or generic multi-object wrapper: recurse.
             if (rendererChildren.Count > 1)
             {
                 int before = result.Count;
@@ -257,8 +274,6 @@ namespace FallenForest.EditorTools
                 if (result.Count > before) return;
             }
 
-            // A single renderer or a generic indivisible hierarchy is still a legitimate prop;
-            // dimensions will classify it later rather than discarding user geometry.
             result.Add(node);
         }
 
@@ -372,109 +387,91 @@ namespace FallenForest.EditorTools
             return bestScore >= 5 ? best : null;
         }
 
-        private static void AppendTrees(ForestScatterer forest, List<GameObject> additions)
+        private static void SetTexture(Material material, string urpProperty, string legacyProperty, Texture2D texture)
         {
-            SerializedObject so = new(forest);
-            SerializedProperty trees = so.FindProperty("treePrefabs");
-            var combined = new List<GameObject>();
-            for (int i = 0; i < trees.arraySize; i++)
-            {
-                GameObject existing = trees.GetArrayElementAtIndex(i).objectReferenceValue as GameObject;
-                if (existing != null) combined.Add(existing);
-            }
-            // The HD spruce remains dominant. Each low-poly variant is weighted twice for visible
-            // variety without taking over the art direction.
-            foreach (GameObject addition in additions)
-            {
-                combined.Add(addition);
-                combined.Add(addition);
-            }
-            trees.arraySize = combined.Count;
-            for (int i = 0; i < combined.Count; i++)
-                trees.GetArrayElementAtIndex(i).objectReferenceValue = combined[i];
-            so.ApplyModifiedPropertiesWithoutUndo();
-        }
-
-        private static List<GameObject> LoadGeneratedPrefabs(string prefix)
-        {
-            var result = new List<GameObject>();
-            foreach (string guid in AssetDatabase.FindAssets("t:GameObject", new[] { PrefabDir }))
-            {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (!path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase)) continue;
-                if (!Path.GetFileNameWithoutExtension(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
-                GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
-                if (prefab != null) result.Add(prefab);
-            }
-            result.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
-            return result;
-        }
-
-        private static void DeleteOldGeneratedPrefabs()
-        {
-            if (!AssetDatabase.IsValidFolder(PrefabDir)) return;
-            foreach (string guid in AssetDatabase.FindAssets("t:GameObject", new[] { PrefabDir }))
-            {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase))
-                    AssetDatabase.DeleteAsset(path);
-            }
-        }
-
-        private static void NormalizeExtremeScale(GameObject root, ref Bounds bounds, float targetHeight, float minimumHeight, float maximumHeight)
-        {
-            if (bounds.size.y <= .001f) return;
-            if (bounds.size.y >= minimumHeight && bounds.size.y <= maximumHeight) return;
-            float factor = targetHeight / bounds.size.y;
-            root.transform.localScale *= factor;
+            if (texture == null) return;
+            if (material.HasProperty(urpProperty)) material.SetTexture(urpProperty, texture);
+            if (material.HasProperty(legacyProperty)) material.SetTexture(legacyProperty, texture);
         }
 
         private static void AddTrunkCollider(GameObject root, Bounds bounds)
         {
-            float treeHeight = Mathf.Max(bounds.size.y, 2f);
-            float radius = Mathf.Clamp(Mathf.Min(bounds.size.x, bounds.size.z) * .16f, .14f, .55f);
-            float height = Mathf.Max(radius * 2f, treeHeight * .70f);
-            CapsuleCollider trunk = root.AddComponent<CapsuleCollider>();
-            trunk.direction = 1;
-            trunk.radius = radius;
-            trunk.height = height;
-            Vector3 centre = new(bounds.center.x, bounds.min.y + height * .5f, bounds.center.z);
-            trunk.center = root.transform.InverseTransformPoint(centre);
+            CapsuleCollider collider = root.AddComponent<CapsuleCollider>();
+            collider.direction = 1;
+            collider.center = root.transform.InverseTransformPoint(new Vector3(bounds.center.x, bounds.min.y + bounds.size.y * .45f, bounds.center.z));
+            collider.height = Mathf.Max(.8f, bounds.size.y * .76f);
+            collider.radius = Mathf.Clamp(Mathf.Min(bounds.size.x, bounds.size.z) * .22f, .12f, 1.2f);
         }
 
         private static void AddVisibilityOccluder(GameObject root, Bounds bounds)
         {
-            GameObject occluder = new("FoliageVisibilityOccluder");
-            occluder.transform.SetParent(root.transform, false);
-            BoxCollider box = occluder.AddComponent<BoxCollider>();
-            box.isTrigger = true;
-            box.center = root.transform.InverseTransformPoint(bounds.center + Vector3.up * bounds.size.y * .08f);
-            box.size = new Vector3(
-                Mathf.Max(.45f, bounds.size.x * .72f),
-                Mathf.Max(.8f, bounds.size.y * .68f),
-                Mathf.Max(.45f, bounds.size.z * .72f));
-            occluder.AddComponent<VisibilityOccluder>();
+            VisibilityOccluder occluder = root.AddComponent<VisibilityOccluder>();
+            SerializedObject so = new(occluder);
+            SerializedProperty radius = so.FindProperty("radius");
+            if (radius != null) radius.floatValue = Mathf.Max(.5f, Mathf.Max(bounds.extents.x, bounds.extents.z));
+            SerializedProperty height = so.FindProperty("height");
+            if (height != null) height.floatValue = Mathf.Max(1f, bounds.size.y);
+            so.ApplyModifiedPropertiesWithoutUndo();
         }
 
-        private static Bounds CalculateBounds(Renderer[] renderers)
+        private static Bounds CalculateBounds(IEnumerable<Renderer> renderers)
         {
-            if (renderers == null || renderers.Length == 0) return new Bounds(Vector3.zero, Vector3.one);
-            Bounds bounds = renderers[0].bounds;
-            for (int i = 1; i < renderers.Length; i++) bounds.Encapsulate(renderers[i].bounds);
-            return bounds;
+            bool has = false;
+            Bounds bounds = new(Vector3.zero, Vector3.zero);
+            foreach (Renderer renderer in renderers)
+            {
+                if (renderer == null) continue;
+                if (!has) { bounds = renderer.bounds; has = true; }
+                else bounds.Encapsulate(renderer.bounds);
+            }
+            return has ? bounds : new Bounds(Vector3.zero, Vector3.one);
         }
 
-        private static void SetTexture(Material material, string preferred, string fallback, Texture texture)
+        private static void NormalizeExtremeScale(GameObject root, ref Bounds bounds, float targetHeight, float minHeight, float maxHeight)
         {
-            if (texture == null || material == null) return;
-            if (material.HasProperty(preferred)) material.SetTexture(preferred, texture);
-            else if (material.HasProperty(fallback)) material.SetTexture(fallback, texture);
+            float h = Mathf.Max(.001f, bounds.size.y);
+            if (h >= minHeight && h <= maxHeight) return;
+            float scale = targetHeight / h;
+            root.transform.localScale *= scale;
         }
 
-        private static void SetObject(SerializedObject so, string propertyName, UnityEngine.Object value)
+        private static void DeleteOldGeneratedPrefabs()
         {
-            SerializedProperty property = so.FindProperty(propertyName);
-            if (property != null) property.objectReferenceValue = value;
+            if (!Directory.Exists(PrefabDir)) return;
+            foreach (string path in Directory.GetFiles(PrefabDir, "*.prefab", SearchOption.TopDirectoryOnly))
+                AssetDatabase.DeleteAsset(path.Replace('\\', '/'));
+        }
+
+        private static List<GameObject> LoadGeneratedPrefabs(string prefix)
+        {
+            return AssetDatabase.FindAssets("t:Prefab", new[] { PrefabDir })
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Where(p => Path.GetFileNameWithoutExtension(p).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                .Select(AssetDatabase.LoadAssetAtPath<GameObject>)
+                .Where(p => p != null)
+                .ToList();
+        }
+
+        private static void AppendTrees(ForestScatterer forest, List<GameObject> additions)
+        {
+            SerializedObject so = new(forest);
+            SerializedProperty array = so.FindProperty("treePrefabs");
+            var all = new List<GameObject>();
+            for (int i = 0; i < array.arraySize; i++)
+            {
+                GameObject current = array.GetArrayElementAtIndex(i).objectReferenceValue as GameObject;
+                if (current != null && !current.name.StartsWith("LowPolyTree_", StringComparison.OrdinalIgnoreCase)) all.Add(current);
+            }
+            all.AddRange(additions);
+            array.arraySize = all.Count;
+            for (int i = 0; i < all.Count; i++) array.GetArrayElementAtIndex(i).objectReferenceValue = all[i];
+            so.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        private static void SetObject(SerializedObject so, string property, UnityEngine.Object value)
+        {
+            SerializedProperty p = so.FindProperty(property);
+            if (p != null) p.objectReferenceValue = value;
         }
     }
 }
