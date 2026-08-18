@@ -4,7 +4,7 @@ name: Build Fallen Forest APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main, integration/release-mainline ]
+    branches: [ main ]
     paths:
       - 'Assets/**'
       - 'Packages/**'
