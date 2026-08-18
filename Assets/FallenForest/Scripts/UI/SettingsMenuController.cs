@@ -43,6 +43,13 @@ namespace FallenForest.UI
             RefreshLabels();
         }
 
+        // Compatibility shim for the legacy source-scene assembler. The release finalizer removes
+        // the old FOV slider entirely, and this method deliberately changes no runtime state.
+        // Keeping the no-op here makes older generated scenes safe to import while world FOV remains 75°.
+        public void SetFov(float ignored)
+        {
+        }
+
         private void RefreshLabels()
         {
             if (sensitivityValue != null)
