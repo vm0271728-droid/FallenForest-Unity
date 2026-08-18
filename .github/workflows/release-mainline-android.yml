@@ -47,7 +47,7 @@ jobs:
           set -euo pipefail
           python3 -m pip install --disable-pip-version-check --quiet 'gdown>=5.2,<6'
 
-          python3 -m gdown 'https://drive.google.com/uc?id=1W9RzSrC8SWn1BJCa_i0OU2Wkk0L0LQe6' -O all-needed.zip
+          python3 -m gdown 'https://drive.google.com/uc?id=1W9RzSrC8SWn1BJCa_i0OU2Wkk0L0Qe6' -O all-needed.zip
           test -f all-needed.zip
           test "$(stat -c %s all-needed.zip)" = '85825470'
           echo '0848ea17b01f750747a37e3af9b0e74723efcba58a253c20e798e30b41a5e9d8  all-needed.zip' | sha256sum -c -
@@ -241,9 +241,6 @@ jobs:
           echo "Canonical release compile/import failed with exit code $rc." >&2
           exit "$rc"
 
-      # Refresh the short-lived Personal activation immediately before the real player build.
-      # The previous run proved the ULF contains both headless and Android entitlements, but the
-      # Editor's spawned licensing client later returned an empty entitlement group during build.
       - name: Refresh Unity Personal immediately before APK build
         uses: buildalon/activate-unity-license@v2
         with:
@@ -259,26 +256,65 @@ jobs:
           set -uo pipefail
           apk='Builds/Android/Fallen_Forest_1.0.0.apk'
           log="$RUNNER_TEMP/unity-release-build.log"
-          rm -f "$apk"
+          rm -f "$apk" "$log"
+          touch "$log"
 
-          # CI-only workaround for Unity 6 Personal entitlement flakiness:
-          # - select Android before project load rather than switching late inside BuildPipeline;
-          # - run the Editor with a virtual X display instead of batch/headless mode, avoiding the
-          #   com.unity.editor.headless entitlement path that intermittently returned an empty group.
-          # The game project/runtime is unchanged.
+          # Keep Android selected before project load and use Xvfb/software GL,
+          # but restore batchmode so -executeMethod runs deterministically.
           set +e
-          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a "$UNITY_EDITOR_PATH" \
+          setsid env LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a "$UNITY_EDITOR_PATH" \
+            -batchmode \
             -quit \
             -buildTarget Android \
             -projectPath "$GITHUB_WORKSPACE" \
             -executeMethod FallenForest.EditorTools.FallenForestProjectBuilder.CIBuildAndroid \
-            -logFile "$log"
+            -logFile "$log" &
+          unity_pid=$!
+          set -e
+
+          tail --pid="$unity_pid" -n +1 -F "$log" &
+          tail_pid=$!
+
+          last_size=0
+          last_change=$(date +%s)
+          watchdog_failed=0
+
+          while kill -0 "$unity_pid" 2>/dev/null; do
+            sleep 20
+            size=$(stat -c %s "$log" 2>/dev/null || echo 0)
+            now=$(date +%s)
+            if [ "$size" -ne "$last_size" ]; then
+              last_size="$size"
+              last_change="$now"
+            elif [ $((now - last_change)) -ge 900 ]; then
+              echo '::error::Unity build log has not changed for 15 minutes; terminating stalled Editor.'
+              watchdog_failed=1
+              kill -TERM -- "-$unity_pid" 2>/dev/null || true
+              sleep 15
+              kill -KILL -- "-$unity_pid" 2>/dev/null || true
+              break
+            fi
+          done
+
+          set +e
+          wait "$unity_pid"
           rc=$?
           set -e
-          cat "$log" || true
+          wait "$tail_pid" 2>/dev/null || true
+
+          if [ "$watchdog_failed" -eq 1 ]; then
+            echo 'Last 200 Unity log lines:'
+            tail -n 200 "$log" || true
+            exit 124
+          fi
 
           if grep -Eq 'error CS[0-9]{4}' "$log"; then
             echo 'C# compiler error detected during canonical APK build.' >&2
+            exit 1
+          fi
+          if grep -Fq 'Aborting batchmode due to failure' "$log"; then
+            echo 'Unity explicitly aborted the APK build.' >&2
+            [ "$rc" -ne 0 ] && exit "$rc"
             exit 1
           fi
           if [ ! -s "$apk" ]; then
@@ -290,12 +326,33 @@ jobs:
             echo 'Unity did not emit the successful Fallen Forest build marker.' >&2
             exit 1
           fi
-          unzip -tqq "$apk" || { echo 'APK ZIP structure validation failed.' >&2; exit 1; }
+          unzip -tqq "$apk" || {
+            echo 'APK ZIP structure validation failed.' >&2
+            exit 1
+          }
 
-          if [ "$rc" -ne 0 ]; then
-            echo "::warning::Unity exited with code $rc after BuildPipeline had already reported success and the APK passed ZIP integrity; accepting the verified artifact."
+          if [ "$rc" -eq 0 ]; then
+            echo 'Canonical Unity Android build completed cleanly.'
+            exit 0
           fi
-          echo 'Canonical Unity Android APK was produced and verified.'
+
+          if [ "$rc" -eq 139 ] \
+            && grep -Fq 'Batchmode quit successfully invoked - shutting down!' "$log" \
+            && grep -Fq 'Caught fatal signal - signo:11' "$log"; then
+            echo '::warning::Verified Unity teardown SIGSEGV after a validated successful APK build; accepting the artifact.'
+            exit 0
+          fi
+
+          if [ "$rc" -eq 134 ] \
+            && grep -Fq 'Batchmode quit successfully invoked - shutting down!' "$log" \
+            && grep -Fq 'Fatal Error! Cannot create web request without initializing the system' "$log" \
+            && grep -Fq 'Caught fatal signal - signo:6' "$log"; then
+            echo '::warning::Verified Unity Analytics/WebRequest teardown SIGABRT after a validated successful APK build; accepting the artifact.'
+            exit 0
+          fi
+
+          echo "Unity returned exit code $rc after producing the APK, but it was not a verified post-success teardown crash." >&2
+          exit "$rc"
 
       - name: Verify produced APK
         if: success()
