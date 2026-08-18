@@ -1,13 +1,15 @@
-name: BlockWorld PR Build Gate
+name: BlockWorld Build Gate
 
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [blockworld-godot-build]
+    paths:
+      - '.github/workflows/blockworld-pr-gate.yml'
   workflow_dispatch:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 jobs:
   dispatch-and-collect:
@@ -70,3 +72,22 @@ jobs:
             collected/install-result.txt
             collected/runtime-smoke.txt
             collected/runtime-logcat.txt
+
+      - name: Publish success marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          HASH="$(awk '{print $1}' collected/BlockWorld.apk.sha256)"
+          cat > BlockWorld_CI_LAST_SUCCESS.txt <<EOF
+          status=success
+          target_run_id=$RUN_ID
+          source_head=$(git rev-parse HEAD)
+          apk_sha256=$HASH
+          gate_run_id=$GITHUB_RUN_ID
+          completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add BlockWorld_CI_LAST_SUCCESS.txt
+          git commit -m 'Record successful BlockWorld Android build' || exit 0
+          git push origin HEAD:blockworld-godot-build
