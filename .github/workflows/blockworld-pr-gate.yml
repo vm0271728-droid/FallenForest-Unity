@@ -1,0 +1,206 @@
+name: BlockWorld Build Gate
+
+on:
+  push:
+    branches: [blockworld-godot-build]
+    paths:
+      - '.github/workflows/blockworld-pr-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  dispatch-and-collect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TARGET_WORKFLOW: blockworld-android.yml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: blockworld-godot-build
+
+      - name: Publish running marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          cat > BlockWorld_CI_LAST_SUCCESS.txt <<EOF
+          status=running
+          gate_run_id=$GITHUB_RUN_ID
+          gate_head=$(git rev-parse HEAD)
+          started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          git add BlockWorld_CI_LAST_SUCCESS.txt
+          git commit -m 'Record running BlockWorld Android build'
+          git push origin HEAD:blockworld-godot-build
+
+      - name: Bake improved source payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          TMP="$RUNNER_TEMP/blockworld-bake"
+          rm -rf "$TMP"
+          mkdir -p "$TMP/src"
+          cat BlockWorld_CI_Source.part* > "$TMP/source.zip.b64"
+          base64 -d "$TMP/source.zip.b64" > "$TMP/source.zip"
+          unzip -tq "$TMP/source.zip" >/dev/null
+          unzip -q "$TMP/source.zip" -d "$TMP/src"
+          if [ -f "$TMP/src/BlockWorld/project.godot" ]; then
+            mv "$TMP/src/BlockWorld" "$TMP/root"
+            rm -rf "$TMP/src"
+            mv "$TMP/root" "$TMP/src"
+          fi
+          test -f "$TMP/src/project.godot"
+
+          python3 - <<PY
+          from pathlib import Path
+          root=Path('$TMP/src')
+          main=root/'scripts/main.gd'
+          s=main.read_text()
+          s=s.replace('var cc:=chunk_queue.pop_front()', 'var cc:Vector2i=chunk_queue.pop_front()')
+          s=s.replace('var cc:=rebuild_queue.pop_front()', 'var cc:Vector2i=rebuild_queue.pop_front()')
+          main.write_text(s)
+          chunk=root/'scripts/chunk.gd'
+          s=chunk.read_text()
+          s=s.replace('var local_n := Vector3i(x,y,z) + DIRS[f]', 'var local_n: Vector3i = Vector3i(x,y,z) + Vector3i(DIRS[f])')
+          s=s.replace('var gp := Vector3i(coord.x*SIZE+x, y, coord.y*SIZE+z) + DIRS[f]', 'var gp: Vector3i = Vector3i(coord.x*SIZE+x, y, coord.y*SIZE+z) + Vector3i(DIRS[f])')
+          chunk.write_text(s)
+          project=root/'project.godot'
+          s=project.read_text()
+          marker='textures/canvas_textures/default_texture_filter=0'
+          if 'textures/vram_compression/import_etc2_astc=true' not in s:
+              s=s.replace(marker, marker+'\ntextures/vram_compression/import_etc2_astc=true')
+          project.write_text(s)
+          PY
+
+          if ! grep -q '_build_block_atlas' "$TMP/src/scripts/main.gd"; then
+            python3 - <<'PY'
+          from pathlib import Path
+          import base64, gzip
+          text=Path('.github/workflows/blockworld-android.yml').read_text()
+          marker="<<'PATCH64'"
+          a=text.index(marker)+len(marker)
+          b=text.index('\n          PATCH64', a)
+          payload=''.join(line.strip() for line in text[a:b].splitlines() if line.strip())
+          raw=gzip.decompress(base64.b64decode(payload))
+          Path('/tmp/blockworld-v2.patch').write_bytes(raw)
+          PY
+            (cd "$TMP/src" && patch --batch --forward -p1 < /tmp/blockworld-v2.patch) || true
+          fi
+
+          python3 - <<PY
+          from pathlib import Path
+          root=Path('$TMP/src')
+          main=root/'scripts/main.gd'
+          s=main.read_text()
+          s=s.replace('var h := abs((px*7349 + py*9151 + id*31337) ^ (px*py*97 + id*199)) % 100', 'var h: int = abs((px*7349 + py*9151 + id*31337) ^ (px*py*97 + id*199)) % 100')
+          s=s.replace('var k := 0.84 + float(h) / 100.0 * 0.28', 'var k: float = 0.84 + float(h) / 100.0 * 0.28')
+          s=s.replace('var c := Color(clampf(base.r*k,0,1), clampf(base.g*k,0,1), clampf(base.b*k,0,1), base.a)', 'var c: Color = Color(clampf(base.r*k,0,1), clampf(base.g*k,0,1), clampf(base.b*k,0,1), base.a)')
+          main.write_text(s)
+          preset=root/'export_presets.cfg'
+          e=preset.read_text().replace('architectures/x86_64=true','architectures/x86_64=false')
+          preset.write_text(e)
+          PY
+
+          grep -q 'window/handheld/orientation=0' "$TMP/src/project.godot"
+          grep -q 'window/frame_pacing/android/enable_frame_pacing=true' "$TMP/src/project.godot"
+          ! grep -q 'Break a tree' "$TMP/src/scripts/main.gd"
+          grep -q '_build_block_atlas' "$TMP/src/scripts/main.gd"
+          grep -q '_build_voxel_body' "$TMP/src/scripts/mob.gd"
+          grep -q 'var h: int = abs' "$TMP/src/scripts/main.gd"
+
+          (cd "$TMP/src" && zip -qr "$TMP/baked.zip" .)
+          base64 -w0 "$TMP/baked.zip" > BlockWorld_CI_Source.part00
+          for f in BlockWorld_CI_Source.part*; do
+            [ "$f" = 'BlockWorld_CI_Source.part00' ] || rm -f "$f"
+          done
+          git add -A BlockWorld_CI_Source.part*
+          if ! git diff --cached --quiet; then
+            git commit -m 'Bake BlockWorld landscape visual performance overhaul'
+            git push origin HEAD:blockworld-godot-build
+            echo 'BAKED_NOW=1' >> "$GITHUB_ENV"
+          else
+            echo 'BAKED_NOW=0' >> "$GITHUB_ENV"
+          fi
+
+      - name: Dispatch BlockWorld Android build
+        if: env.BAKED_NOW != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEFORE="$(gh run list --repo "$REPO" --workflow "$TARGET_WORKFLOW" --branch blockworld-godot-build --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+          echo "BEFORE=$BEFORE" >> "$GITHUB_ENV"
+          gh workflow run "$TARGET_WORKFLOW" --repo "$REPO" --ref blockworld-godot-build
+
+      - name: Locate dispatched run
+        if: env.BAKED_NOW != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID=""
+          for i in $(seq 1 60); do
+            RUN_ID="$(gh run list --repo "$REPO" --workflow "$TARGET_WORKFLOW" --branch blockworld-godot-build --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "$BEFORE" ]; then break; fi
+            RUN_ID=""
+            sleep 2
+          done
+          test -n "$RUN_ID"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "Dispatched run: $RUN_ID"
+
+      - name: Wait for tested Android build
+        if: env.BAKED_NOW != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run watch "$RUN_ID" --repo "$REPO" --exit-status
+
+      - name: Download tested artifact
+        if: env.BAKED_NOW != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p collected
+          gh run download "$RUN_ID" --repo "$REPO" --name BlockWorld-Android --dir collected
+          test -s collected/BlockWorld.apk
+          test -s collected/BlockWorld.apk.sha256
+          cat collected/BlockWorld.apk.sha256
+
+      - name: Upload gated APK artifact
+        if: env.BAKED_NOW != '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlockWorld-Android-Gated
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            collected/BlockWorld.apk
+            collected/BlockWorld.apk.sha256
+            collected/apk-badging.txt
+            collected/install-result.txt
+            collected/runtime-smoke.txt
+            collected/runtime-logcat.txt
+
+      - name: Publish success marker
+        if: env.BAKED_NOW != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          HASH="$(awk '{print $1}' collected/BlockWorld.apk.sha256)"
+          cat > BlockWorld_CI_LAST_SUCCESS.txt <<EOF
+          status=success
+          target_run_id=$RUN_ID
+          apk_sha256=$HASH
+          gate_run_id=$GITHUB_RUN_ID
+          completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          git add BlockWorld_CI_LAST_SUCCESS.txt
+          git commit -m 'Record successful BlockWorld Android build'
+          git push origin HEAD:blockworld-godot-build

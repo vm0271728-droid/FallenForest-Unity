@@ -1,0 +1,107 @@
+# retrigger after ARM ABI verification fix
+name: BlockWorld V2 Trigger
+
+on:
+  push:
+    branches: [blockworld-godot-build]
+    paths:
+      - '.github/workflows/blockworld-trigger-once.yml'
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  trigger:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TARGET: blockworld-android.yml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: blockworld-godot-build
+
+      - name: Dispatch target build
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEFORE="$(gh run list --repo "$REPO" --workflow "$TARGET" --branch blockworld-godot-build --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+          gh workflow run "$TARGET" --repo "$REPO" --ref blockworld-godot-build
+          RUN_ID=""
+          for i in $(seq 1 60); do
+            RUN_ID="$(gh run list --repo "$REPO" --workflow "$TARGET" --branch blockworld-godot-build --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "$BEFORE" ]; then break; fi
+            RUN_ID=""
+            sleep 2
+          done
+          test -n "$RUN_ID"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          cat > BlockWorld_CI_LAST_SUCCESS.txt <<EOF
+          status=running
+          target_run_id=$RUN_ID
+          trigger_run_id=$GITHUB_RUN_ID
+          started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add BlockWorld_CI_LAST_SUCCESS.txt
+          git commit -m 'Record running BlockWorld v2 build'
+          git push origin HEAD:blockworld-godot-build
+
+      - name: Wait and report target
+        shell: bash
+        run: |
+          set +e
+          gh run watch "$RUN_ID" --repo "$REPO" --exit-status
+          WATCH_RC=$?
+          CONCLUSION="$(gh run view "$RUN_ID" --repo "$REPO" --json conclusion --jq .conclusion)"
+          set -e
+          if [ "$WATCH_RC" -ne 0 ] || [ "$CONCLUSION" != 'success' ]; then
+            cat > BlockWorld_CI_LAST_SUCCESS.txt <<EOF
+          status=failure
+          target_run_id=$RUN_ID
+          trigger_run_id=$GITHUB_RUN_ID
+          completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+            git add BlockWorld_CI_LAST_SUCCESS.txt
+            git commit -m 'Record failed BlockWorld v2 build'
+            git push origin HEAD:blockworld-godot-build
+            exit 1
+          fi
+
+      - name: Download verified APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p collected
+          gh run download "$RUN_ID" --repo "$REPO" --name BlockWorld-Android --dir collected
+          test -s collected/BlockWorld.apk
+          HASH="$(awk '{print $1}' collected/BlockWorld.apk.sha256)"
+          cat > BlockWorld_CI_LAST_SUCCESS.txt <<EOF
+          status=success
+          target_run_id=$RUN_ID
+          apk_sha256=$HASH
+          trigger_run_id=$GITHUB_RUN_ID
+          completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          git add BlockWorld_CI_LAST_SUCCESS.txt
+          git commit -m 'Record successful BlockWorld v2 build'
+          git push origin HEAD:blockworld-godot-build
+
+      - name: Upload gated APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlockWorld-V2-Gated
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            collected/BlockWorld.apk
+            collected/BlockWorld.apk.sha256
+            collected/apk-badging.txt
+            collected/install-result.txt
+            collected/runtime-smoke.txt
+            collected/runtime-logcat.txt
