@@ -1,0 +1,72 @@
+name: BlockWorld PR Build Gate
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-and-collect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TARGET_WORKFLOW: blockworld-android.yml
+    steps:
+      - name: Dispatch BlockWorld Android build
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEFORE="$(gh run list --repo "$REPO" --workflow "$TARGET_WORKFLOW" --branch blockworld-godot-build --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+          echo "BEFORE=$BEFORE" >> "$GITHUB_ENV"
+          gh workflow run "$TARGET_WORKFLOW" --repo "$REPO" --ref blockworld-godot-build
+
+      - name: Locate dispatched run
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID=""
+          for i in $(seq 1 60); do
+            RUN_ID="$(gh run list --repo "$REPO" --workflow "$TARGET_WORKFLOW" --branch blockworld-godot-build --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "$BEFORE" ]; then break; fi
+            RUN_ID=""
+            sleep 2
+          done
+          test -n "$RUN_ID"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "Dispatched run: $RUN_ID"
+
+      - name: Wait for tested Android build
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run watch "$RUN_ID" --repo "$REPO" --exit-status
+
+      - name: Download tested artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p collected
+          gh run download "$RUN_ID" --repo "$REPO" --name BlockWorld-Android --dir collected
+          test -s collected/BlockWorld.apk
+          test -s collected/BlockWorld.apk.sha256
+          cat collected/BlockWorld.apk.sha256
+
+      - name: Upload gated APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlockWorld-Android-Gated
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            collected/BlockWorld.apk
+            collected/BlockWorld.apk.sha256
+            collected/apk-badging.txt
+            collected/install-result.txt
+            collected/runtime-smoke.txt
+            collected/runtime-logcat.txt
