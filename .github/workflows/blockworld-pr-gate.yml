@@ -41,25 +41,22 @@ jobs:
           git commit -m 'Record running BlockWorld Android build'
           git push origin HEAD:blockworld-godot-build
 
-      - name: Normalize source payload
+      - name: Remove obsolete payload parts
         shell: bash
         run: |
           set -euo pipefail
           TMP="$RUNNER_TEMP/blockworld-payload"
           rm -rf "$TMP"
-          mkdir -p "$TMP/extracted"
-          cat BlockWorld_CI_Source.part* > "$TMP/source.zip.b64"
-          base64 -d "$TMP/source.zip.b64" > "$TMP/source.zip"
-          unzip -q "$TMP/source.zip" -d "$TMP/extracted"
-          test -f "$TMP/extracted/BlockWorld/project.godot"
-          (cd "$TMP/extracted/BlockWorld" && zip -qr "$TMP/rootless.zip" .)
-          base64 -w0 "$TMP/rootless.zip" > BlockWorld_CI_Source.part00
+          mkdir -p "$TMP"
+          base64 -d BlockWorld_CI_Source.part00 > "$TMP/rootless.zip"
+          unzip -tq "$TMP/rootless.zip" >/dev/null
+          unzip -Z1 "$TMP/rootless.zip" | grep -qx 'project.godot'
           for f in BlockWorld_CI_Source.part*; do
             [ "$f" = "BlockWorld_CI_Source.part00" ] || rm -f "$f"
           done
-          git add -A BlockWorld_CI_Source.part*
+          git add -A
           if ! git diff --cached --quiet; then
-            git commit -m 'Normalize BlockWorld CI source payload'
+            git commit -m 'Remove obsolete BlockWorld CI source payload parts'
             git push origin HEAD:blockworld-godot-build
           fi
 
