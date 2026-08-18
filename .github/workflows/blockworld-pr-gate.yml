@@ -41,6 +41,28 @@ jobs:
           git commit -m 'Record running BlockWorld Android build'
           git push origin HEAD:blockworld-godot-build
 
+      - name: Fix source extraction packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/blockworld-android.yml')
+          s=p.read_text()
+          old='''          rm -rf BlockWorld\n          mkdir -p BlockWorld\n          unzip -q "$RUNNER_TEMP/BlockWorld_Source.zip" -d BlockWorld\n          test -f BlockWorld/project.godot'''
+          new='''          rm -rf BlockWorld\n          unzip -q "$RUNNER_TEMP/BlockWorld_Source.zip" -d .\n          test -f BlockWorld/project.godot'''
+          if old in s:
+              s=s.replace(old,new)
+              p.write_text(s)
+          elif new not in s:
+              raise SystemExit('Expected extraction block not found')
+          PY
+          git add .github/workflows/blockworld-android.yml
+          if ! git diff --cached --quiet; then
+            git commit -m 'Fix BlockWorld CI source extraction'
+            git push origin HEAD:blockworld-godot-build
+          fi
+
       - name: Dispatch BlockWorld Android build
         shell: bash
         run: |
