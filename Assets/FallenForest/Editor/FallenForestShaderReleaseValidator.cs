@@ -43,8 +43,9 @@ namespace FallenForest.EditorTools
                     errors.Add($"{path} [{platform}] line {message.line}: {message.message}");
                 }
 
-                if (!shader.isSupported)
-                    errors.Add($"Shader is unsupported on the current release target/editor: {path}");
+                // Do not gate a headless -nographics CI build on Shader.isSupported. That property
+                // describes the current end-user graphics card, not whether the Android build-target
+                // compiler accepted the shader. Compiler messages above are the deterministic gate.
             }
 
             if (errors.Count == 0)
